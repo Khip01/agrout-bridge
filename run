@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+if [ ! -f "bin-executables/app-linux" ] && [ ! -f "bin-executables/app-mac" ]; then
+  echo "Binary not found. Building first..."
+  ./build
+fi
+
+case "$(uname -s)" in
+  Linux*)  BIN="bin-executables/app-linux" ;;
+  Darwin*) BIN="bin-executables/app-mac" ;;
+  *)       echo "Unsupported OS"; exit 1 ;;
+esac
+
+if [ ! -f "$BIN" ]; then
+  echo "Binary $BIN not found. Building..."
+  ./build
+fi
+
+exec "$BIN" "$@"

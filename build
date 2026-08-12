@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")"
+echo "Getting dependencies..."
+dart pub get
+echo "Compiling..."
+dart compile exe bin/agrout_bridge.dart -o bin-executables/app-linux
+echo "Done! Binary at bin-executables/app-linux"

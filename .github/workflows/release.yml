@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "[0-9]*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            binary: app-linux
+          - os: macos-latest
+            binary: app-mac
+          - os: windows-latest
+            binary: app-win.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Compile
+        shell: bash
+        run: dart compile exe bin/agrout_bridge.dart -o ${{ matrix.binary }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary }}
+          path: ${{ matrix.binary }}
+
+  package:
+    name: Package tarball
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.ref_name, '-rc') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-alpha') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Stage binaries
+        shell: bash
+        run: |
+          cp artifacts/app-linux/app-linux app-linux
+          cp artifacts/app-mac/app-mac app-mac
+          cp artifacts/app-win.exe/app-win.exe app-win.exe
+          chmod 755 app-linux app-mac
+          ls -la app-linux app-mac app-win.exe
+
+      - name: Package tarball
+        shell: bash
+        run: node scripts/stage-npm-package.mjs --out .
+
+      - name: Verify tarball
+        shell: bash
+        run: |
+          TGZ=$(ls agrout-bridge-*.tgz)
+          echo "Tarball: $TGZ"
+          tar tzf "$TGZ"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball
+          path: agrout-bridge-*.tgz
+
+  release:
+    name: Create GitHub release
+    needs: [build, package]
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.ref_name, '-rc') && !contains(github.ref_name, '-beta') && !contains(github.ref_name, '-alpha') }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: tarball
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          files: agrout-bridge-*.tgz
+          body: |
+            ## What's in ${{ github.ref_name }}
+
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for full details.
+
+            ## Installation
+
+            ```bash
+            # Download the .tgz asset below, then:
+            npm install -g ./agrout-bridge-${{ github.ref_name }}.tgz
+
+            # Run the bridge
+            agrout-bridge run          # TUI mode
+            agrout-bridge run --server # Headless server mode
+
+            # Update when a new release is out
+            agrout-bridge update
+            ```
+
+            ### Why not `npm install -g Khip01/agrout-bridge#${{ github.ref_name }}`?
+
+            npm v11 has a bug installing global git deps: the install appears to succeed but the `agrout-bridge` binary is missing. Always install from a local tarball.
+
+            ## Requirements
+
+            - Node.js 18+ (for the npm launcher)
+            - An AgentRouter account + API key

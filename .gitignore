@@ -1,0 +1,27 @@
+# Runtime / build artifacts
+bin-executables/
+.dart_tool/
+build/
+*.log
+*.lock
+
+# Local config and secrets — never committed
+*.env
+.env
+.env.local
+config.json
+profiles.json
+logs.jsonl
+update-cache.json
+
+# Dev / smoke inputs
+dev/
+
+# Test / coverage outputs
+coverage/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

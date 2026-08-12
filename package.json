@@ -1,0 +1,37 @@
+{
+  "name": "agrout-bridge",
+  "version": "0.1.0",
+
+  "description": "AgentRouter bridge with TUI dashboard. OpenAI- and Anthropic-compatible local proxy that spoofs Claude Code headers to bypass the upstream client-detection gate.",
+  "type": "module",
+  "bin": {
+    "agrout-bridge": "./bin/agrout-bridge.js"
+  },
+  "scripts": {
+    "postinstall": "node -e \"if(process.platform !== 'win32'){const fs=require('fs');['app-linux','app-mac'].forEach(f=>{try{fs.chmodSync('./bin-executables/'+f,0o755)}catch(e){}});}\""
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "agentrouter",
+    "bridge",
+    "proxy",
+    "opencode",
+    "openai",
+    "anthropic",
+    "claude",
+    "cli",
+    "tui",
+    "cross-platform"
+  ],
+  "author": {
+    "name": "Khip01",
+    "url": "https://github.com/Khip01"
+  },
+  "license": "MIT",
+  "files": [
+    "bin/agrout-bridge.js",
+    "bin-executables/"
+  ]
+}

@@ -1,0 +1,50 @@
+name: Post-release validation
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  install-sim:
+    name: Install from real published tarball
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Download tarball from release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${GITHUB_REF_NAME:-main}
+          if [ "$TAG" = "main" ]; then
+            URL=$(curl -sS -H "Authorization: token $GH_TOKEN" https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name)
+          else
+            URL=$TAG
+          fi
+          echo "Release: $URL"
+          TGZ=agrout-bridge-$URL.tgz
+          curl -sSL -o "$TGZ" "https://github.com/${{ github.repository }}/releases/download/$URL/$TGZ"
+          ls -la "$TGZ"
+
+      - name: Install to isolated prefix
+        run: |
+          mkdir -p _prefix
+          npm install --prefix _prefix -g ./agrout-bridge-*.tgz 2>&1 | tail -5
+          ls -la _prefix/bin/
+
+      - name: Verify binary exists
+        run: |
+          BIN=$(find _prefix -name 'agrout-bridge' -type f | head -1)
+          test -n "$BIN" || (echo "agrout-bridge binary not found" && exit 1)
+          "$BIN" --version
+          "$BIN" help | head -5
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -rf _prefix
