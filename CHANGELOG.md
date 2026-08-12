@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.1.3 (2026-08-12)
+
+### Fixes
+
+- `agrout-bridge update` reported "Already up to date" after a release
+  if the user ran it within one hour of a prior `update` invocation.
+  The local `update-cache.json` (1h TTL) shadowed the GitHub
+  `releases/latest` lookup, so the newest tag was never queried.
+  `Updater.fetchLatestTag()` now accepts a `forceRefresh` flag, and the
+  explicit `update` command always passes `forceRefresh: true` so the
+  API is consulted on every user-triggered check. The cache remains in
+  place for future background polls (none are wired yet). Added a
+  regression test (`test/updater_test.dart`) using a local stub HTTP
+  server that seeds stale cache, asserts it is bypassed, and asserts
+  the cache is refreshed on success.
+
 ## v0.1.2 (2026-08-12)
 
 ### Fixes

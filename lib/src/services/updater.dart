@@ -19,9 +19,23 @@ class UpdateResult {
 class Updater {
   static const _owner = 'Khip01';
   static const _repo = 'agrout-bridge';
-  static const _apiBase = 'https://api.github.com';
-  static const _dlBase = 'https://github.com/$_owner/$_repo/releases/download';
+  // Mutable to allow tests to stub the API endpoint with a local HttpServer.
+  // Production callers never override these.
+  static String _apiBase = 'https://api.github.com';
+  static String _dlBase = 'https://github.com/$_owner/$_repo/releases/download';
   static const _cacheTtlMs = 60 * 60 * 1000; // 1 hour
+
+  /// Test-only override for the API base URL. Production never calls this.
+  static void setApiBaseForTest(String base) {
+    _apiBase = base;
+    _dlBase = '$base';
+  }
+
+  /// Test-only reset to the production API base URL.
+  static void resetApiBaseForTest() {
+    _apiBase = 'https://api.github.com';
+    _dlBase = 'https://github.com/$_owner/$_repo/releases/download';
+  }
 
   /// Read the cached latest tag if it is younger than [_cacheTtlMs].
   String? _readCache() {
@@ -48,9 +62,22 @@ class Updater {
     } catch (_) {}
   }
 
-  Future<String?> fetchLatestTag() async {
-    final cached = _readCache();
-    if (cached != null) return cached;
+  void clearCache() {
+    try {
+      final f = File('${configDir()}${Platform.pathSeparator}update-cache.json');
+      if (f.existsSync()) f.deleteSync();
+    } catch (_) {}
+  }
+
+  /// Fetch the latest tag from GitHub. When [forceRefresh] is true, the local
+  /// cache is bypassed and refreshed on success. The explicit `update` command
+  /// always passes `forceRefresh: true` so a user running `agrout-bridge update`
+  /// twice within the cache TTL window always sees the real latest tag.
+  Future<String?> fetchLatestTag({bool forceRefresh = false}) async {
+    if (!forceRefresh) {
+      final cached = _readCache();
+      if (cached != null) return cached;
+    }
     try {
       final client = HttpClient();
       final req = await client.getUrl(Uri.parse('$_apiBase/repos/$_owner/$_repo/releases/latest'));
@@ -60,7 +87,7 @@ class Updater {
       if (resp.statusCode != 200) {
         await resp.drain<void>();
         client.close(force: true);
-        return cached;
+        return forceRefresh ? null : _readCache();
       }
       final raw = await resp.transform(utf8.decoder).join();
       client.close(force: true);
@@ -69,7 +96,7 @@ class Updater {
       if (tag != null) _writeCache(tag);
       return tag;
     } catch (_) {
-      return cached;
+      return forceRefresh ? null : _readCache();
     }
   }
 
@@ -124,7 +151,7 @@ class Updater {
   /// Perform the update. Returns a result describing the outcome; caller is
   /// expected to display [message] and exit non-zero on `success == false`.
   Future<UpdateResult> update() async {
-    final tag = await fetchLatestTag();
+    final tag = await fetchLatestTag(forceRefresh: true);
     if (tag == null) return UpdateResult.fail('Failed to check latest version from GitHub');
 
     final latest = parseSemver(tag);
