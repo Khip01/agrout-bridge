@@ -614,8 +614,14 @@ class AppState extends State<AgroutApp> {
   }
 
   Future<void> _doQuit() async {
+    // Stop the HTTP server first so no in-flight request is left holding
+    // a socket, then hand control back to nocterm's shutdown scheduler so
+    // the alternate-screen buffer, mouse-tracking, and cursor visibility
+    // are restored cleanly. Calling `exit()` directly bypasses all of that
+    // and leaves the terminal in the state you observed (mouse still
+    // producing escape sequences after quit).
     await _proxy.stop();
-    exit(0);
+    shutdownApp(0);
   }
 
   // ── Port config panel ─────────────────────────────────────────────

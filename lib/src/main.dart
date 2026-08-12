@@ -112,8 +112,12 @@ Future<void> _runCommand(List<String> args) async {
     proxyServer: controller,
   );
   await runApp(app);
+  // Mirrors commandcode-bridge: do not `exit(0)` here. The TUI calls
+  // `shutdownApp(0)` which asks nocterm to restore the terminal and end
+  // the process naturally. Calling `exit()` from outside the TUI would
+  // race with the alternate-screen restore and re-introduce the
+  // mouse-tracking leak.
   await controller.stop();
-  exit(0);
 }
 
 Future<void> _profileCommand(List<String> args) async {

@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.1.1 (2026-08-12)
+
+### Fixes
+
+- TUI quit left the terminal in a broken state: after `[q] Yes` the
+  process exited via `dart:io exit()`, bypassing nocterm's terminal
+  cleanup. Result: mouse movements continued to print garbage escapes
+  on the shell after the bridge had quit (alternate-screen buffer and
+  mouse-tracking flags were never restored). Replaced `exit()` with
+  `shutdownApp(0)` in `tui/app.dart` and dropped the trailing
+  `exit(0)` from `main.dart`, matching `commandcode-bridge`'s flow.
+
 ## v0.1.0 (2026-08-12)
 
 Initial release.
