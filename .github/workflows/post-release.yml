@@ -22,14 +22,11 @@ jobs:
         run: |
           TAG=${GITHUB_REF_NAME:-main}
           if [ "$TAG" = "main" ]; then
-            URL=$(curl -sS -H "Authorization: token $GH_TOKEN" https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name)
-          else
-            URL=$TAG
+            TAG=$(curl -sS -H "Authorization: token $GH_TOKEN" https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name)
           fi
-          echo "Release: $URL"
-          TGZ=agrout-bridge-$URL.tgz
-          curl -sSL -o "$TGZ" "https://github.com/${{ github.repository }}/releases/download/$URL/$TGZ"
-          ls -la "$TGZ"
+          echo "Release: $TAG"
+          gh release download "$TAG" --pattern 'agrout-bridge-*.tgz' --dir .
+          ls -la agrout-bridge-*.tgz
 
       - name: Install to isolated prefix
         run: |
