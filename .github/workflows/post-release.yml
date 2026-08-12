@@ -36,8 +36,15 @@ jobs:
 
       - name: Verify binary exists
         run: |
-          BIN=$(find _prefix -name 'agrout-bridge' -type f | head -1)
+          # The npm-installed bin is a symlink to .../bin/agrout-bridge.js;
+          # follow the link so we execute the Node launcher (which in turn
+          # spawns the native binary).
+          BIN=$(find -L _prefix -name 'agrout-bridge' -type f 2>/dev/null | head -1)
+          if [ -z "$BIN" ]; then
+            BIN=$(find _prefix -name 'agrout-bridge' 2>/dev/null | head -1)
+          fi
           test -n "$BIN" || (echo "agrout-bridge binary not found" && exit 1)
+          echo "Found: $BIN"
           "$BIN" --version
           "$BIN" help | head -5
 
