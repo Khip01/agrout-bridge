@@ -285,7 +285,7 @@ class AppState extends State<AgroutApp> {
           Text(' agrout-bridge', style: const TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold)),
           const Spacer(),
           Text(_activeProfileLabel(), style: const TextStyle(color: Colors.grey)),
-          Text('  [$_pageTab(_infoPage)] ', style: const TextStyle(color: Colors.yellow, fontWeight: FontWeight.bold)),
+          Text('  [${_pageTab(_infoPage)}] ', style: const TextStyle(color: Colors.yellow, fontWeight: FontWeight.bold)),
           Text(_pageNames[_infoPage.index], style: const TextStyle(color: Colors.white)),
           Text('  port $port', style: const TextStyle(color: Colors.grey)),
         ],

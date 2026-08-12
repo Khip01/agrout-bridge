@@ -88,8 +88,11 @@ class LoginFlow {
 
   Future<void> _servePage(HttpRequest req) async {
     final body = _loginHtml;
-    req.response.headers.contentLength = body.length;
-    req.response.write(body);
+    final bytes = utf8.encode(body);
+    req.response.headers.contentType = ContentType.html;
+    req.response.headers.contentLength = bytes.length;
+    req.response.headers.set('Cache-Control', 'no-store');
+    req.response.add(bytes);
     await req.response.close();
   }
 
@@ -146,15 +149,18 @@ class LoginFlow {
 
   Future<void> _serveSuccess(HttpRequest req) async {
     final body = _successHtml;
+    final bytes = utf8.encode(body);
     req.response.headers.contentType = ContentType.html;
-    req.response.headers.contentLength = body.length;
-    req.response.write(body);
+    req.response.headers.contentLength = bytes.length;
+    req.response.headers.set('Cache-Control', 'no-store');
+    req.response.add(bytes);
     await req.response.close();
   }
 
   void _redirectWithError(HttpRequest req, String msg) {
     req.response.statusCode = 303;
     req.response.headers.set('Location', '/login?err=${Uri.encodeQueryComponent(msg)}');
+    req.response.headers.contentLength = 0;
   }
 
   static const _loginHtml = '''

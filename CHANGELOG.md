@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.1.2 (2026-08-12)
+
+### Fixes
+
+- Local sign-in page returned `ERR_EMPTY_RESPONSE` because the HTML
+  body was never written: `_servePage` set the response headers and
+  closed the socket without ever calling `response.add(_loginHtml)`.
+  Same class of bug in `_serveSuccess`. Both helpers now write the
+  UTF-8 body with a `Content-Length` header before closing, and add
+  `Cache-Control: no-store`. Added a regression test
+  (`test/login_serve_test.dart`) that drives the page over a real
+  HttpClient and asserts the form fields are present.
+- Header strip rendered `[Closure: ...]` instead of the current page
+  number. The interpolation `'$_pageTab(_infoPage)'` was reading the
+  method reference as a string; corrected to
+  `'${_pageTab(_infoPage)}'`.
+
 ## v0.1.1 (2026-08-12)
 
 ### Fixes
