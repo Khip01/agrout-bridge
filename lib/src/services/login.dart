@@ -67,14 +67,17 @@ class LoginFlow {
     try {
       if (req.method == 'GET' && path == '/login') {
         req.response.headers.contentType = ContentType.html;
-        return _servePage(req);
+        await _servePage(req);
+        return;
       }
       if (req.method == 'POST' && path == '/login') {
-        return _handleSubmit(req, onResult);
+        await _handleSubmit(req, onResult);
+        return;
       }
       if (req.method == 'GET' && path == '/success') {
         req.response.headers.contentType = ContentType.html;
-        return _serveSuccess(req);
+        await _serveSuccess(req);
+        return;
       }
       req.response.statusCode = 404;
       await req.response.close();

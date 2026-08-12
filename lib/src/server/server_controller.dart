@@ -143,24 +143,33 @@ class ServerController {
 
     // Open endpoints
     if (method == 'GET' && (path == '/health' || path == '/api/health')) {
-      return _respondHealth(req);
+      _respondHealth(req);
+      return;
     }
     if (method == 'GET' && (path == '/v1/models' || path == '/models')) {
-      return _respondModels(req);
+      await _respondModels(req);
+      return;
     }
     if (method == 'GET' && path == '/info') {
-      return _respondInfo(req);
+      _respondInfo(req);
+      return;
     }
     if (method == 'GET' && path == '/v1/token') {
-      return _respondToken(req);
+      _respondToken(req);
+      return;
     }
 
-    // Proxy endpoints (require profile + optional auth)
+    // Proxy endpoints (require profile + optional auth). Fire-and-forget:
+    // each handler owns the response lifecycle (writes, closes) and a
+    // top-level await would block the server from accepting new connections
+    // while a slow upstream is in flight.
     if (method == 'POST' && (path == '/v1/messages' || path == '/messages')) {
-      return _proxyAnthropic(req);
+      unawaited(_proxyAnthropic(req));
+      return;
     }
     if (method == 'POST' && path == '/v1/chat/completions') {
-      return _proxyOpenAi(req);
+      unawaited(_proxyOpenAi(req));
+      return;
     }
 
     // Unknown route
