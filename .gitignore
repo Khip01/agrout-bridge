@@ -25,3 +25,4 @@ coverage/
 .vscode/
 .DS_Store
 Thumbs.db
+agentrouter-bridge/

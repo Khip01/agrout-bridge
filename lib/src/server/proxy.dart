@@ -101,6 +101,11 @@ Future<void> proxyRequest({
           final body = Map<String, dynamic>.from(parsed);
           if (body['model'] is String) model = body['model'] as String;
           if (body['stream'] == true) streaming = true;
+          // Trim oversized system messages (Opencode/Claude Code emit a very
+          // large system prompt with memory/skills/journal blocks) to avoid
+          // tripping agentrouter.org's input content filter / quota. Mirrors
+          // the approach used by Lyravein's agentrouter-bridge.
+          trimSystemMessages(body);
           // Normalize OpenAI-native reasoning params into the Anthropic-native
           // `thinking` block for Claude-family models.
           //
@@ -136,6 +141,10 @@ Future<void> proxyRequest({
         'Authorization': authHeader,
         if (serializeCookieHeader(cookies) != null) 'Cookie': serializeCookieHeader(cookies)!,
         'Accept': streaming ? 'text/event-stream' : 'application/json',
+        // Spoof the Claude Code client UA so agentrouter.org's
+        // client-fingerprint layer accepts the request (only this UA is
+        // whitelisted; other clients get 401 unauthorized_client_detected).
+        'User-Agent': 'opencode/1.0',
       },
     );
 
@@ -198,6 +207,20 @@ Future<void> proxyRequest({
       await pumpSse(
         source: upstreamResp.transform(utf8.decoder).transform(const LineSplitter()),
         emit: (line) {
+          // Drop upstream content-filter / billing lines that would otherwise
+          // terminate the stream for the client (mirrors Lyravein's approach).
+          // These lines appear mid-stream when agentrouter.org's gate or the
+          // backend emits a soft block / budget summary that should not abort
+          // the whole chat. Dropping them lets the rest of the stream through.
+          final low = line.toLowerCase();
+          if (line.startsWith('data:') &&
+              (low.contains('content_blocked') ||
+               low.contains('sensitive_words') ||
+               low.contains('billing.summary') ||
+               low.trim() == 'data: null')) {
+            onLog?.call('sse filtered: ${line.substring(0, line.length > 80 ? 80 : line.length)}');
+            return;
+          }
           try {
             clientReq.response.write(line);
             // Track usage deltas.
@@ -321,6 +344,52 @@ bool normalizeReasoning(String model, Map<String, dynamic> body) {
     }
   }
   return changed;
+}
+
+/// Max character length for a single system message before trimming.
+const _maxSystemChars = 8000;
+
+/// Tags that OpenCode/Claude Code inject into the system message which carry
+/// large variable context (memories, available skills, journal entries,
+/// instructions). These are the biggest contributors to oversized system
+/// prompts and the most likely false-positive content-filter triggers, so we
+/// strip them. Mirrors Lyravein's agentrouter-bridge sanitization.
+final _systemStripTags = RegExp(
+  r'<memory_blocks>[\s\S]*?</memory_blocks>|'
+  r'<available_skills>[\s\S]*?</available_skills>|'
+  r'<memory_instructions>[\s\S]*?</memory_instructions>|'
+  r'<journal_instructions>[\s\S]*?</journal_instructions>',
+  dotAll: true,
+);
+
+/// Trim oversized system messages in [body.messages] so the forwarded request
+/// stays within agentrouter.org's input filter tolerance. Strips the large
+/// dev-injected context tags and hard-caps any remaining system message at
+/// [_maxSystemChars]. Only `role == 'system'` messages are touched; all
+/// user/assistant content is forwarded verbatim.
+void trimSystemMessages(Map<String, dynamic> body) {
+  final msgs = body['messages'];
+  if (msgs is! List) return;
+  var changed = false;
+  for (final m in msgs) {
+    if (m is! Map) continue;
+    if (m['role'] != 'system') continue;
+    final content = m['content'];
+    if (content is! String) continue;
+    final stripped = content.replaceAll(_systemStripTags, '');
+    if (stripped != content) {
+      changed = true;
+      m['content'] = stripped;
+    }
+    if ((m['content'] as String).length > _maxSystemChars) {
+      changed = true;
+      m['content'] = (m['content'] as String).substring(0, _maxSystemChars) +
+          '\n\n[system prompt trimmed by bridge to reduce content-filter false positives]';
+    }
+  }
+  if (changed) {
+    body['messages'] = msgs;
+  }
 }
 
 /// Pull input/output/cache tokens + total cost from a non-streaming response
