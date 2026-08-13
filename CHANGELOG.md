@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.1.5 (2026-08-13)
+
+### Fixes
+
+- `agrout-bridge run --server` crashed on startup with `SocketException:
+  Failed to create server socket (OS Error: Address already in use, errno =
+  98), port = 8318` when a previous bridge process (or anything else) held
+  the default port 8318. `ServerController.start()` now retries the next
+  free port (8318 -> 8319 -> 8320, bounded to 25 attempts) on any
+  `SocketException`, and persists the bound port into the config store so
+  `/info`, `/health` and the TUI report the real listen address. Verified
+  live: with 8318 occupied by another process, bridge binds 8319 and
+  serves correctly.
+
+
 All notable changes to this project will be documented in this file.
 
 ## v0.1.4 (2026-08-12)

@@ -84,14 +84,57 @@ class ServerController {
       );
 
   /// Start the server. Idempotent: if a server is already running, returns.
-  Future<void> start() async {
-    if (_server != null) return;
+  ///
+  /// If the configured [serverPort] is already in use, the bridge will
+  /// automatically try the next free port (serverPort+1, +2, ...) up to
+  /// `serverPort + maxPortAttempts`, so a stale process on 8318 does not
+  /// block startup. The bound port is persisted into the config store so
+  /// /info, the TUI and logs report the actual listen port.
+  static const maxPortAttempts = 25;
+
+  Future<int> start() async {
+    if (_server != null) return _server!.port;
     final addr = InternetAddress(configStore.config.listenAddress);
-    _server = await HttpServer.bind(addr, configStore.config.serverPort);
+    int candidate = configStore.config.serverPort;
+    HttpServer? server;
+    var tries = 0;
+    while (tries < maxPortAttempts) {
+      try {
+        server = await HttpServer.bind(addr, candidate);
+        break;
+      } on SocketException {
+        // Any bind failure (port in use, shared-flag conflict, etc.) ->
+        // treat as "port unavailable" and move to the next candidate.
+        // Dart surfaces port conflicts under several different messages
+        // depending on the platform and whether a peer listener exists, so
+        // we do not narrow on a substring here.
+        tries += 1;
+        if (candidate == configStore.config.serverPort) {
+          // ignore: avoid_print
+          print('port $candidate in use, retrying nearby');
+        }
+        candidate += 1;
+        continue;
+      }
+    }
+    if (server == null) {
+      throw SocketException(
+          'no free port in range ${configStore.config.serverPort}..'
+          '${configStore.config.serverPort + maxPortAttempts - 1}');
+    }
+    _server = server;
+    if (candidate != configStore.config.serverPort) {
+      // Persist the actual bound port so /info + TUI reflect reality.
+      try {
+        configStore.config.serverPort = candidate;
+        configStore.save();
+      } catch (_) {}
+    }
     _server!.listen(_handle, onError: (e) {
       // ignore: avoid_print
       print('server error: $e');
     });
+    return _server!.port;
   }
 
   Future<void> stop() async {
