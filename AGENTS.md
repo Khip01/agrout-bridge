@@ -15,7 +15,10 @@ The bridge identifies itself to AgentRouter with an API key (`sk-...`). Each
 profile stores one key plus an optional session token captured from a local
 sign-in flow. AgentRouter has no username/password registration, so the
 sign-in page opens provider OAuth (GitHub / LinuxDO) and accepts a pasted
-session token / API key; credentials login is not supported.
+API key / session token; credentials login is not supported. The pasted
+value is validated against `/v1/models` (accepts dashboard API keys) and
+stored as the profile `apiKey`; the provider buttons auto-capture a session
+token by bouncing the OAuth redirect back to the bridge's `/oauth/callback`.
 
 ```
 agrout-bridge profile add <name>      # prompt for key

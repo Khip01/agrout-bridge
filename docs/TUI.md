@@ -76,14 +76,19 @@ log is a sidebar, fullscreen log when toggled.
 shows the URL. The user opens it in any browser and signs in through
 provider OAuth. AgentRouter has no username/password registration, so
 the local page shows "Sign in with GitHub" and "Sign in with LinuxDO"
-buttons; each opens the real provider authorize URL (state token from
-`/api/oauth/state`, client id from `/api/status`). After completing
-sign-in in the browser the user pastes the resulting session token /
-API key into the local page, and the bridge:
+buttons. Each opens the real provider authorize URL (state token from
+`/api/oauth/state`, client id from `/api/status`) with `redirect_uri`
+pointing back at the bridge's own `/oauth/callback`. After the user
+approves the provider in the browser, the bridge exchanges the code for
+a session token automatically (no paste), then:
 
-1. Best-effort: fetches `/api/user/self` to verify the token and
-   populate the Profile page with username / email / quota.
+1. Best-effort: fetches `/api/user/self` to populate the Profile page
+   with username / email / quota.
 2. Stores the session token on the active profile.
+
+The page also has a paste field as a fallback. Pasting a dashboard API
+key (`sk-...`) works directly: it is validated against `/v1/models` and
+stored as the profile's API key.
 
 Keymap (active while the panel is open):
 

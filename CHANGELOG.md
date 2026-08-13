@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.1.8 (2026-08-13)
+
+### Fixes
+
+- Pasting a dashboard **API key** now works. AgentRouter has two distinct
+  credential types: an API key (`sk-...` from the dashboard) that
+  authorizes `/v1/*` proxy calls, and a session token from provider OAuth
+  that authorizes dashboard endpoints like `/api/user/self`. The sign-in
+  page previously validated against `/api/user/self`, which rejects
+  dashboard API keys with "access token 无效" (无权进行此操作). The pasted
+  value is now validated against `/v1/models` (the check that accepts an
+  API key) and stored as the profile's `apiKey`; account-info enrichment
+  via `/api/user/self` is best-effort only.
+- **Auto-capture provider OAuth** (no manual paste). The "Sign in with
+  GitHub" / "Sign in with LinuxDO" buttons now bounce the provider back to
+  the bridge's own `/oauth/callback` (via `redirect_uri` pointing at the
+  local server) instead of agentrouter.org. The bridge exchanges the code
+  at `GET /api/oauth/github?code=...&state=...&mode=login`, captures the
+  session token New API issues, and stores it automatically. Requires one
+  interactive provider approval in the browser, exactly like 9Router.
+
+### Internal
+
+- `test/login_serve_test.dart`: added mock-driven tests for API-key
+  validation via `/v1/models` and OAuth code->session exchange via the
+  callback route.
+- `dart analyze`: 0 issues. Full non-live suite: 65 tests pass.
+
 ## v0.1.7 (2026-08-13)
 
 ### Fixes

@@ -43,6 +43,40 @@ class WarmupResult {
   WarmupResult(this.cookies, this.statusCode);
 }
 
+/// Result of exchanging a provider OAuth code. [sessionToken] is populated
+/// from the session cookie New API issues on the callback.
+class OauthExchangeResult {
+  final bool success;
+  final String? sessionToken;
+  final Map<String, dynamic>? accountInfo;
+  final String? message;
+  final int statusCode;
+  OauthExchangeResult({
+    required this.success,
+    this.sessionToken,
+    this.accountInfo,
+    this.message,
+    required this.statusCode,
+  });
+}
+
+/// Extract the session token from a `Set-Cookie` header list (New API names
+/// it `session-token`). Returns null when absent.
+String? extractSessionCookie(List<String>? setCookie) {
+  if (setCookie == null) return null;
+  for (final raw in setCookie) {
+    final pair = raw.split(';').first;
+    final eq = pair.indexOf('=');
+    if (eq <= 0) continue;
+    final name = pair.substring(0, eq).trim();
+    if (name.toLowerCase() == 'session-token' || name.toLowerCase() == 'session_token') {
+      final v = pair.substring(eq + 1).trim();
+      if (v.isNotEmpty) return v;
+    }
+  }
+  return null;
+}
+
 /// Result of `POST /api/user/login`. Either [success] is true and
 /// [sessionToken] is populated, or [success] is false and [message] carries
 /// the upstream text (often in Chinese on New API).
@@ -326,6 +360,51 @@ class AgentRouterClient {
       path: AgentRouterPaths.userSelf,
       authHeader: 'Bearer $sessionToken',
       cookies: cookies,
+    );
+  }
+
+  /// `GET /api/oauth/<provider>?code=...&state=...&mode=login` — exchange a
+  /// provider OAuth code (from a redirect_uri bounce-back) for the session
+  /// payload. The response `data` is the user object, and the session token
+  /// is available from the `Set-Cookie` headers (New API issues it as a
+  /// session cookie). This lets the local bridge complete a full provider
+  /// sign-in without any manual paste.
+  Future<OauthExchangeResult> exchangeOauthCode({
+    required String code,
+    required String state,
+  }) async {
+    final resp = await send(
+      method: 'GET',
+      path: '/api/oauth/github?code=$code&state=$state&mode=login',
+      extraHeaders: const {},
+    );
+    final body = await resp.transform(utf8.decoder).join();
+
+    // New API issues the session via `Set-Cookie` on this callback.
+    String? sessionToken = extractSessionCookie(resp.headers['set-cookie']);
+    Map<String, dynamic>? info;
+    String? message;
+    try {
+      final parsed = jsonDecode(body);
+      if (parsed is Map) {
+        if (parsed['success'] != true) {
+          message = parsed['message']?.toString() ?? 'OAuth exchange failed';
+        }
+        final data = parsed['data'];
+        if (data is Map) info = data.cast<String, dynamic>();
+        final tok = data is Map ? data['token']?.toString() : null;
+        sessionToken ??= tok;
+      }
+    } catch (_) {
+      message = body.isEmpty ? 'HTTP ${resp.statusCode}' : body;
+    }
+
+    return OauthExchangeResult(
+      success: sessionToken != null && message == null,
+      sessionToken: sessionToken,
+      accountInfo: info,
+      message: message,
+      statusCode: resp.statusCode,
     );
   }
 

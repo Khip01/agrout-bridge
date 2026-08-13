@@ -374,6 +374,8 @@ class AppState extends State<AgroutApp> {
           _kv('Group', p.accountInfo!['group']?.toString() ?? '-'),
           _kv('Quota', p.accountInfo!['quota']?.toString() ?? '-'),
           _kv('Used', p.accountInfo!['used_quota']?.toString() ?? '-'),
+          if (p.accountInfo!['remaining_quota'] != null)
+            _kv('Remaining', p.accountInfo!['remaining_quota'].toString()),
         ],
       ],
       _section('Available profiles'),

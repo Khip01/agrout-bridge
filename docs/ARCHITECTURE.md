@@ -129,32 +129,42 @@ single source of truth for that regression.
 
 AgentRouter has no username/password registration: accounts are created and
 signed into exclusively through provider OAuth (GitHub or LinuxDO). The
-local sign-in flow therefore opens the provider authorize URL and accepts a
-pasted session token / API key rather than posting credentials.
+local sign-in flow therefore opens the provider authorize URL and either
+auto-captures the session via a redirect bounce-back, or accepts a pasted
+API key / session token as a fallback.
 
 ```
 TUI [l]  ──> LoginFlow.start()           ──>  HttpServer.bind(127.0.0.1, ephemeral)
                                              │
-Browser  ──> GET  http://127.0.0.1:.../login  <──┤  serve OAuth page (2 provider buttons + token field)
+Browser  ──> GET  http://127.0.0.1:.../login  <──┤  serve OAuth page (2 provider buttons + paste field)
 Browser  ──> GET  .../oauth/github          <──┤  LoginFlow._handleOAuth
                                              │    ├─  GET /api/oauth/state?mode=login   -> signed state token
                                              │    ├─  GET /api/status                   -> github_client_id / linuxdo_client_id
-                                             │    └─  302 -> provider authorize URL (state carried)
+                                             │    └─  302 -> provider authorize URL with redirect_uri
                                              │         github:  https://github.com/login/oauth/authorize
                                              │         linuxdo: https://connect.linux.do/oauth2/authorize
-Browser  ──> POST .../login/token          <──┤  LoginFlow._handleTokenSubmit (paste sk-... after OAuth)
-                                             │    ├─  best-effort GET /api/user/self (verify token)
-                                             │    └─  Profile.upsert(authToken + accountInfo)
+                                             │         redirect_uri = http://127.0.0.1:<port>/oauth/callback
+Provider --> GET  .../oauth/callback?code&state <──┤  LoginFlow._handleOAuthCallback
+                                             │    ├─  GET /api/oauth/<provider>?code&state&mode=login
+                                             │    ├─  capture session token (Set-Cookie session-token)
+                                             │    ├─  best-effort GET /api/user/self (quota / used_quota)
+                                             │    └─  Profile.upsert(authToken + accountInfo)  (auto, no paste)
+Browser  ──> POST .../login/token          <──┤  LoginFlow._handleTokenSubmit (fallback)
+                                             │    ├─  validate against GET /v1/models (accepts API key)
+                                             │    └─  Profile.upsert(apiKey)  (best-effort /api/user/self)
 
 Browser  ──> GET  /success                <──┤  LoginFlow._serveSuccess
                                              │
 TUI       <──  onResult(LoginOutcome)     <──┘  panel updates, [Esc] closes the server
 ```
 
-The provider OAuth cookie is set on the agentrouter.org domain, so the local
-bridge can never read it; that is why the flow ends with a manual token
-paste. The pasted session token never leaves the profile JSON (mode `0600`)
-and is never logged.
+The auto-capture path bounces the provider redirect back to the bridge's own
+`/oauth/callback` (a `redirect_uri` on `127.0.0.1`), so the code never lands
+on agentrouter.org and the bridge exchanges it for the session directly.
+Dashboard API keys are validated against `/v1/models` (the check that
+accepts them); `/api/user/self` is best-effort enrichment only, since that
+session-only endpoint rejects API keys with "access token 无效". Tokens
+never leave the profile JSON (mode `0600`) and are never logged.
 
 ## State locations
 
