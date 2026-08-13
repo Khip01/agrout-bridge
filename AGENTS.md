@@ -13,7 +13,9 @@ same proxy without a TUI for daemon / Docker usage.
 
 The bridge identifies itself to AgentRouter with an API key (`sk-...`). Each
 profile stores one key plus an optional session token captured from a local
-sign-in flow.
+sign-in flow. AgentRouter has no username/password registration, so the
+sign-in page opens provider OAuth (GitHub / LinuxDO) and accepts a pasted
+session token / API key; credentials login is not supported.
 
 ```
 agrout-bridge profile add <name>      # prompt for key
@@ -57,7 +59,7 @@ agrout-bridge/
 │       │   ├── spoof.dart          # Claude Code spoof header constants
 │       │   ├── waf.dart            # WAF cookie jar (warmup, capture, merge, persist)
 │       │   ├── api_client.dart     # AgentRouter HTTP (New API endpoints)
-│       │   ├── login.dart          # Local sign-in callback server + login relay
+│       │   ├── login.dart          # Local sign-in callback server + OAuth provider relay
 │       │   ├── usage_store.dart    # Aggregated usage + cost from response billing
 │       │   ├── log_store.dart      # JSONL activity log
 │       │   └── updater.dart        # Self-update: API cache + download .tgz + npm install -g
@@ -249,11 +251,13 @@ mitigates the most common false positives before forwarding — see
    `content_blocked` / `sensitive_words` / `billing.summary` / `data: null`
    lines are dropped (logged to the activity log) instead of aborting the
    stream, so OpenCode keeps receiving partial responses.
-4. **Port auto-increment.** If `8318` is occupied by a stale bridge
-   process, `ServerController.start()` retries the next free port
-   (8318 -> 8319 -> 8320, bounded to 25 attempts) and persists the bound
-   port into the config store so `/info`, `/health` and the TUI report the
-   actual listen address.
+4. **Port auto-increment (no ratchet).** If `8318` is occupied by a stale
+   bridge process, `ServerController.start()` retries the next free port
+   (8318 -> 8319 -> 8320, bounded to 25 attempts). The escalated port is
+   used only for the current process and is never persisted back into the
+   config store, so a restart returns to the configured default once any
+   stale listener is cleaned up. `/info` reports the actual bound port as
+   `serverPort` and the configured default as `configuredPort`.
 
 If you still hit a hard `content-blocked`, it is an upstream policy
 decision, not a bridge bug — request a budget-policy/quota adjustment on
@@ -265,7 +269,9 @@ AgentRouter provider.
 Default port: `8318` (continuity with the upstream agentrouter-spoof-proxy).
 Config persisted at `~/.config/agrout-bridge/config.json`. Port can be changed
 via `[p]` panel in the TUI (with availability scan + auto-increment fallback).
-Empty input = reset to default.
+Empty input = reset to default. If the configured port is occupied at startup,
+the bridge binds the next free port for that run without persisting it; the
+actual bound port is visible via `/info` (`serverPort`) and `/health`.
 
 ## TUI pages
 

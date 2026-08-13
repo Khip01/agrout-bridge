@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.1.7 (2026-08-13)
+
+### Fixes
+
+- Orphan processes no longer accumulate after stopping the bridge. Two
+  root causes fixed:
+  - The npm wrapper (`bin/agrout-bridge.js`) now forwards
+    `SIGINT`/`SIGTERM`/`SIGHUP` to the spawned Dart binary and kills the
+    child on wrapper exit. Previously killing the wrapper orphaned the
+    Dart child, which kept running with no port but never terminating.
+  - Headless mode (`run --server`) now calls `exit(0)` after the server
+    closes. The active `ProcessSignal` subscriptions keep the event loop
+    alive after shutdown, so the process never exited on SIGTERM even
+    though the listener was released.
+- Port auto-increment no longer ratchets the config. The escalated port
+  is used only for the current process and is never persisted, so a normal
+  restart returns to the configured default (e.g. 8318). `/info` now
+  exposes both `serverPort` (actual bound) and `configuredPort`.
+- Sign-in flow rewritten for AgentRouter's OAuth-only accounts. AgentRouter
+  has no username/password registration; the local sign-in page now shows
+  "Sign in with GitHub" and "Sign in with LinuxDO" buttons. Each opens the
+  real provider authorize URL built from `/api/oauth/state` (signed state
+  token) plus the client ids from `/api/status`, then the user pastes the
+  resulting session token / API key back into the local page. The old
+  username/password form is removed.
+
+### Internal
+
+- `test/login_serve_test.dart`: asserts the OAuth page (provider buttons +
+  token field, no username/password), 404 on unknown provider path, and a
+  mock-driven GitHub authorize redirect (302 + client_id + state).
+- `test/server_port_auto_increment_test.dart`: asserts escalation is NOT
+  persisted into the config store.
+- `dart analyze`: 0 issues. Full non-live suite: 63 tests pass.
+
 ## v0.1.6 (2026-08-13)
 
 ### Fixes

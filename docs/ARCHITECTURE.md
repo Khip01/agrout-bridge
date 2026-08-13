@@ -27,7 +27,7 @@ agrout-bridge/
 │       │   ├── spoof.dart          # Claude Code spoof header constants
 │       │   ├── waf.dart            # WAF cookie jar (parse, merge, serialize, classify)
 │       │   ├── api_client.dart     # AgentRouter HTTP client (login, self, models, chat, messages)
-│       │   ├── login.dart          # Local sign-in callback server + login relay
+│       │   ├── login.dart          # Local sign-in callback server + OAuth provider relay
 │       │   ├── usage_store.dart    # Aggregated usage + cost from response billing
 │       │   ├── log_store.dart      # JSONL activity log (2000 entries)
 │       │   └── updater.dart        # Self-update: API cache + download .tgz + npm install -g
@@ -127,26 +127,34 @@ single source of truth for that regression.
 
 ## Login flow
 
+AgentRouter has no username/password registration: accounts are created and
+signed into exclusively through provider OAuth (GitHub or LinuxDO). The
+local sign-in flow therefore opens the provider authorize URL and accepts a
+pasted session token / API key rather than posting credentials.
+
 ```
 TUI [l]  ──> LoginFlow.start()           ──>  HttpServer.bind(127.0.0.1, ephemeral)
-                                            │
-Browser  ──> GET  http://127.0.0.1:.../login  <──┤  serve HTML form
-Browser  ──> POST .../login (user + pass)  <──┤  LoginFlow._handleSubmit
-                                            │
-                                            ├─  AgentRouterClient.warmup()
-                                            ├─  POST /api/user/login (with warmup cookies)
-                                            ├─  capture session token from JSON
-                                            ├─  best-effort GET /api/user/self
-                                            └─  Profile.upsert(authToken + accountInfo)
+                                             │
+Browser  ──> GET  http://127.0.0.1:.../login  <──┤  serve OAuth page (2 provider buttons + token field)
+Browser  ──> GET  .../oauth/github          <──┤  LoginFlow._handleOAuth
+                                             │    ├─  GET /api/oauth/state?mode=login   -> signed state token
+                                             │    ├─  GET /api/status                   -> github_client_id / linuxdo_client_id
+                                             │    └─  302 -> provider authorize URL (state carried)
+                                             │         github:  https://github.com/login/oauth/authorize
+                                             │         linuxdo: https://connect.linux.do/oauth2/authorize
+Browser  ──> POST .../login/token          <──┤  LoginFlow._handleTokenSubmit (paste sk-... after OAuth)
+                                             │    ├─  best-effort GET /api/user/self (verify token)
+                                             │    └─  Profile.upsert(authToken + accountInfo)
 
 Browser  ──> GET  /success                <──┤  LoginFlow._serveSuccess
-                                            │
+                                             │
 TUI       <──  onResult(LoginOutcome)     <──┘  panel updates, [Esc] closes the server
 ```
 
-The local sign-in form is the only credential entry surface; the
-session token never leaves the profile JSON (mode `0600`) and is
-never logged.
+The provider OAuth cookie is set on the agentrouter.org domain, so the local
+bridge can never read it; that is why the flow ends with a manual token
+paste. The pasted session token never leaves the profile JSON (mode `0600`)
+and is never logged.
 
 ## State locations
 

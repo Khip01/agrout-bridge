@@ -22,14 +22,16 @@ class LoginOutcome {
   });
 }
 
-/// Local sign-in flow: serves a tiny HTML form on 127.0.0.1, relays the
-/// submitted credentials to `POST /api/user/login`, captures the session
-/// token, stores it on the active profile, and (best effort) fetches the
-/// dashboard profile into `accountInfo`.
+/// Local sign-in flow: serves a tiny HTML page on 127.0.0.1 that redirects
+/// to the provider OAuth (GitHub / LinuxDO) authorize URL and accepts a
+/// pasted session token / API key. AgentRouter has no username/password
+/// registration, so credentials login is not offered. The pasted token is
+/// stored on the active profile and (best effort) verified against the
+/// dashboard via `GET /api/user/self`.
 ///
 /// The page is opened by the user via a copyable URL (the TUI surfaces it
 /// on `[l]` / `profile login`); nothing leaves the machine except the
-/// single POST to `agentrouter.org` carrying the warmup cookie jar.
+/// OAuth state/config lookups to `agentrouter.org`.
 class LoginFlow {
   final AgentRouterClient client;
   LoginFlow(this.client);
@@ -70,8 +72,12 @@ class LoginFlow {
         await _servePage(req);
         return;
       }
-      if (req.method == 'POST' && path == '/login') {
-        await _handleSubmit(req, onResult);
+      if (req.method == 'GET' && (path == '/oauth/github' || path == '/oauth/linuxdo')) {
+        await _handleOAuth(path == '/oauth/linuxdo', req);
+        return;
+      }
+      if (req.method == 'POST' && path == '/login/token') {
+        await _handleTokenSubmit(req, onResult);
         return;
       }
       if (req.method == 'GET' && path == '/success') {
@@ -96,7 +102,40 @@ class LoginFlow {
     await req.response.close();
   }
 
-  Future<void> _handleSubmit(HttpRequest req, void Function(LoginOutcome) onResult) async {
+  /// Redirect the user's browser to the provider authorize URL. AgentRouter
+  /// has no username/password registration, so the only working sign-in path
+  /// is provider OAuth (GitHub or LinuxDO). We fetch the signed state token
+  /// from `/api/oauth/state` and the client ids from `/api/status`, then 302
+  /// to the provider. The provider redirects back to agentrouter.org which
+  /// issues the session; the user then pastes their session token / API key
+  /// back into the local page (see [_handleTokenSubmit]) since the bridge
+  /// cannot read the provider cookie set on the agentrouter.org domain.
+  Future<void> _handleOAuth(bool linuxdo, HttpRequest req) async {
+    final state = await client.fetchOauthState();
+    if (state == null) {
+      _redirectWithError(req, 'failed to obtain OAuth state from agentrouter.org');
+      return;
+    }
+    final cfg = await client.fetchOauthConfig();
+    final clientId = linuxdo ? cfg['linuxdo_client_id']?.toString() : cfg['github_client_id']?.toString();
+    if (clientId == null || clientId.isEmpty) {
+      _redirectWithError(req, linuxdo ? 'LinuxDO sign-in is not enabled' : 'GitHub sign-in is not enabled');
+      return;
+    }
+    final url = linuxdo
+        ? 'https://connect.linux.do/oauth2/authorize?response_type=code&client_id=$clientId&state=$state'
+        : 'https://github.com/login/oauth/authorize?client_id=$clientId&state=$state&scope=user:email';
+    req.response.statusCode = 302;
+    req.response.headers.set('Location', url);
+    await req.response.close();
+  }
+
+  /// Store a pasted session token (from the agentrouter.org dashboard /
+  /// success page after completing provider OAuth in the browser) onto the
+  /// active profile. This is the only reliable way for a local process to
+  /// obtain an authenticated session: the OAuth cookie itself is set on the
+  /// agentrouter.org domain and is never visible to 127.0.0.1.
+  Future<void> _handleTokenSubmit(HttpRequest req, void Function(LoginOutcome) onResult) async {
     final raw = <int>[];
     await for (final chunk in req) {
       raw.addAll(chunk);
@@ -108,36 +147,36 @@ class LoginFlow {
       _redirectWithError(req, 'bad form data');
       return;
     }
-    final username = fields['username'] ?? '';
-    final password = fields['password'] ?? '';
-    if (username.isEmpty || password.isEmpty) {
-      _redirectWithError(req, 'username and password required');
-      return;
-    }
-
-    final result = await client.login(username: username, password: password);
-    if (!result.success || result.sessionToken == null) {
-      _redirectWithError(req, result.message ?? 'login failed');
-      onResult(LoginOutcome(
-        success: false,
-        message: result.message ?? 'login failed',
-      ));
+    final token = (fields['token'] ?? '').trim();
+    if (token.isEmpty) {
+      _redirectWithError(req, 'session token required');
       return;
     }
 
     Map<String, dynamic>? info;
     String? user;
+    String? message;
     try {
-      final self = await client.fetchSelf(sessionToken: result.sessionToken!, cookies: result.cookies);
-      info = self['data'] is Map ? (self['data'] as Map).cast<String, dynamic>() : self;
+      final self = await client.fetchSelf(sessionToken: token);
+      final data = self['data'];
+      info = data is Map ? data.cast<String, dynamic>() : self;
       user = info['username']?.toString() ?? info['display_name']?.toString();
+      if (self['success'] != true) {
+        message = self['message']?.toString() ?? 'token rejected';
+      }
     } catch (_) {
-      // Soft failure: token works for API even if self failed.
+      message = 'could not verify token against agentrouter.org';
+    }
+
+    if (message != null) {
+      _redirectWithError(req, message);
+      onResult(LoginOutcome(success: false, message: message));
+      return;
     }
 
     onResult(LoginOutcome(
       success: true,
-      sessionToken: result.sessionToken,
+      sessionToken: token,
       username: user,
       accountInfo: info,
     ));
@@ -168,23 +207,31 @@ class LoginFlow {
 <html lang="en"><head><meta charset="utf-8"><title>agrout-bridge sign-in</title>
 <style>
 body { font: 14px/1.5 -apple-system, system-ui, sans-serif; background:#0f1115; color:#d8d8d8; padding:32px; }
-main { max-width:360px; margin:0 auto; }
+main { max-width:420px; margin:0 auto; }
 h1 { font-size:16px; margin:0 0 16px; color:#7fd4ff; }
+p { color:#9aa3ad; margin:0 0 14px; }
+a.btn { display:block; text-align:center; text-decoration:none; padding:10px; border-radius:4px; font-weight:600; margin:8px 0; }
+.btn-github { background:#2a6df4; color:#fff; }
+.btn-linuxdo { background:#1a1d23; border:1px solid #2a2f37; color:#e8e8e8; }
+.sep { border-top:1px solid #2a2f37; margin:20px 0; }
 label { display:block; margin:12px 0 4px; color:#9aa3ad; }
 input { width:100%; box-sizing:border-box; padding:8px; background:#1a1d23; color:#e8e8e8; border:1px solid #2a2f37; border-radius:4px; }
-button { margin-top:18px; width:100%; padding:10px; background:#2a6df4; color:#fff; border:none; border-radius:4px; font-weight:600; cursor:pointer; }
+button { margin-top:12px; width:100%; padding:10px; background:#2a6df4; color:#fff; border:none; border-radius:4px; font-weight:600; cursor:pointer; }
 .note { color:#7c8693; font-size:12px; margin-top:14px; }
 .err { color:#ff7777; font-size:13px; margin-top:10px; }
 </style></head><body><main>
 <h1>agrout-bridge — AgentRouter sign-in</h1>
-<form method="POST" action="/login">
-  <label>Username / email</label>
-  <input type="text" name="username" autofocus required>
-  <label>Password</label>
-  <input type="password" name="password" required>
-  <button type="submit">Sign in</button>
+<p>AgentRouter accounts are created through GitHub or LinuxDO OAuth only.
+Sign in with a provider, then paste your session token back here.</p>
+<a class="btn btn-github" href="/oauth/github">Sign in with GitHub</a>
+<a class="btn btn-linuxdo" href="/oauth/linuxdo">Sign in with LinuxDO</a>
+<div class="sep"></div>
+<form method="POST" action="/login/token">
+  <label>Session token / API key (sk-...)</label>
+  <input type="password" name="token" placeholder="paste token after provider sign-in" required>
+  <button type="submit">Save token</button>
 </form>
-<p class="note">This page is served from 127.0.0.1 by your running agrout-bridge process. Credentials are sent only to agentrouter.org.</p>
+<p class="note">This page is served from 127.0.0.1 by your running agrout-bridge process. Provider OAuth happens in the agentrouter.org browser flow; the bridge cannot read the agentrouter session cookie, so the token is pasted manually.</p>
 <script>
 const p = new URLSearchParams(location.search);
 if (p.get('err')) {

@@ -111,9 +111,11 @@ Requires Dart SDK 3.10+ and Node.js 18+ (Node only needed for the npm
 launcher wrapper).
 
 If port `8318` is already in use (e.g. a stale bridge process), the server
-auto-increments to the next free port and persists it — check the actual
-listen port with `curl http://127.0.0.1:8318/info || curl
-http://127.0.0.1:8319/info`.
+auto-increments to the next free port for that run only — it is never
+persisted, so a restart returns to `8318` once the stale listener is gone.
+Check the actual listen port with `curl http://127.0.0.1:8318/info`; the
+response reports the bound port as `serverPort` and the configured default
+as `configuredPort` (try `8319`/`8320` if `8318` is refused).
 
 ## Platform support
 

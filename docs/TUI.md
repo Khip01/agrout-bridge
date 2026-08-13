@@ -73,14 +73,17 @@ log is a sidebar, fullscreen log when toggled.
 ## Login panel
 
 `[l]` starts a local sign-in server on `127.0.0.1:<ephemeral>` and
-shows the URL. The user opens it in any browser, signs in with their
-AgentRouter username/password, and the bridge:
+shows the URL. The user opens it in any browser and signs in through
+provider OAuth. AgentRouter has no username/password registration, so
+the local page shows "Sign in with GitHub" and "Sign in with LinuxDO"
+buttons; each opens the real provider authorize URL (state token from
+`/api/oauth/state`, client id from `/api/status`). After completing
+sign-in in the browser the user pastes the resulting session token /
+API key into the local page, and the bridge:
 
-1. Warms the WAF cookie jar (`GET /`).
-2. `POST /api/user/login` with the warmed cookies.
-3. Stores the returned session token on the active profile.
-4. Best-effort: fetches `/api/user/self` to populate the Profile page
-   with username / email / quota.
+1. Best-effort: fetches `/api/user/self` to verify the token and
+   populate the Profile page with username / email / quota.
+2. Stores the session token on the active profile.
 
 Keymap (active while the panel is open):
 

@@ -51,6 +51,23 @@ const child = spawn(binaryPath, args, {
   shell: false,
 });
 
+// Forward termination signals to the child so killing the wrapper does
+// not orphan the dart server process (an orphan would keep holding the
+// bridge port, causing the port to be reported as in-use on next start).
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(sig, () => {
+    child.kill(sig);
+  });
+}
+
 child.on("exit", (code) => {
   process.exit(code ?? 0);
+});
+
+// Safety net: if the wrapper dies for any other reason (uncaught error,
+// process.kill without signal), make sure the child does not linger.
+process.on("exit", () => {
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGKILL");
+  }
 });

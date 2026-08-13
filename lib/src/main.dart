@@ -87,11 +87,11 @@ Future<void> _runCommand(List<String> args) async {
 
   final isServer = args.contains('--server');
   final controller = ServerController(profiles: profiles, configStore: config);
-  await controller.start();
+  final boundPort = await controller.start();
   await controller.refreshModels();
 
   if (isServer) {
-    stdout.writeln('agrout-bridge running headless on http://${config.config.listenAddress}:${config.config.serverPort}');
+    stdout.writeln('agrout-bridge running headless on http://${config.config.listenAddress}:$boundPort');
     stdout.writeln('Press Ctrl+C to stop.');
     final completer = Completer<void>();
     ProcessSignal.sigint.watch().listen((_) {
@@ -102,7 +102,12 @@ Future<void> _runCommand(List<String> args) async {
     });
     await completer.future;
     await controller.stop();
-    return;
+    // Headless must exit explicitly: the active ProcessSignal.watch()
+    // subscriptions keep the event loop alive after the server closes, and
+    // leaving the process running would orphan it (holding no port but never
+    // terminating). TUI mode intentionally skips exit() to let nocterm
+    // restore the terminal first; headless has no such constraint.
+    exit(0);
   }
 
   // TUI mode.

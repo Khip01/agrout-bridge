@@ -50,8 +50,11 @@ void main() {
     final bound = await controller.start();
 
     expect(bound, base + 1, reason: 'should pick base+1 since base is occupied');
-    expect(controller.status().port, bound);
-    expect(configStore.config.serverPort, bound, reason: 'config persisted');
+    expect(controller.status().port, bound, reason: 'status reflects actual');
+    // Escalation is NOT persisted: config keeps the configured default so a
+    // later restart returns to `base` once the blocker is gone.
+    expect(configStore.config.serverPort, base,
+        reason: 'auto-increment must not persist into config');
 
     await controller.stop();
     blocker.close();

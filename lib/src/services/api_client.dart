@@ -29,6 +29,7 @@ class AgentRouterPaths {
   static const chatCompletions = '/v1/chat/completions';
   static const messages = '/v1/messages';
   static const login = '/api/user/login';
+  static const oauthState = '/api/oauth/state';
   static const userSelf = '/api/user/self';
   static const userSubscription = '/api/user/subscription';
   static const userDashboard = '/api/user/dashboard';
@@ -274,6 +275,46 @@ class AgentRouterClient {
       statusCode: resp.statusCode,
       cookies: jarAfter,
     );
+  }
+
+  /// `GET /api/status` — site-level OAuth configuration. AgentRouter only
+  /// supports provider sign-in (GitHub / LinuxDO / optional OIDC); there is
+  /// no username+password registration, so the local sign-in flow must open
+  /// the provider authorize URL instead of posting credentials.
+  Future<Map<String, dynamic>> fetchOauthConfig() async {
+    final raw = await send(
+      method: 'GET',
+      path: '/api/status',
+      extraHeaders: const {},
+    );
+    final body = await raw.transform(utf8.decoder).join();
+    try {
+      final parsed = jsonDecode(body);
+      if (parsed is Map && parsed['data'] is Map) {
+        return (parsed['data'] as Map).cast<String, dynamic>();
+      }
+      if (parsed is Map) return parsed.cast<String, dynamic>();
+    } catch (_) {}
+    return const {};
+  }
+
+  /// `GET /api/oauth/state?mode=login` — returns the signed state token that
+  /// must be carried into the provider authorize URL.
+  Future<String?> fetchOauthState() async {
+    final raw = await send(
+      method: 'GET',
+      path: '${AgentRouterPaths.oauthState}?mode=login',
+      extraHeaders: const {},
+    );
+    final body = await raw.transform(utf8.decoder).join();
+    try {
+      final parsed = jsonDecode(body);
+      if (parsed is Map) {
+        final data = parsed['data'];
+        if (data is String && data.isNotEmpty) return data;
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// `GET /api/user/self`. Auth via session token from login.

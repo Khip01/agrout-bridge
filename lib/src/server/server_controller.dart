@@ -61,6 +61,7 @@ class ServerController {
   final ModelHealth modelHealth = ModelHealth();
 
   HttpServer? _server;
+  int _actualPort = 0;
   int _activeStreams = 0;
   final DateTime _startedAt = DateTime.now();
   int _modelCacheVersion = 0;
@@ -72,7 +73,7 @@ class ServerController {
   /// Current server status snapshot. Cheap to call; used by the TUI tick.
   ServerStatus status() => ServerStatus(
         listenAddress: configStore.config.listenAddress,
-        port: configStore.config.serverPort,
+        port: _actualPort != 0 ? _actualPort : configStore.config.serverPort,
         running: _server != null,
         activeStreams: _activeStreams,
         wafCookies: _activeProfileSnapshot()?.wafCookies ?? const {},
@@ -88,8 +89,11 @@ class ServerController {
   /// If the configured [serverPort] is already in use, the bridge will
   /// automatically try the next free port (serverPort+1, +2, ...) up to
   /// `serverPort + maxPortAttempts`, so a stale process on 8318 does not
-  /// block startup. The bound port is persisted into the config store so
-  /// /info, the TUI and logs report the actual listen port.
+  /// block startup. The escalated port is used ONLY for the lifetime of this
+  /// process and is never persisted back into the config store, so a normal
+  /// restart goes back to the configured default (e.g. 8318) once any stale
+  /// listener has been cleaned up. `/info`, `/health` and the TUI report the
+  /// actual bound port via [_actualPort].
   static const maxPortAttempts = 25;
 
   Future<int> start() async {
@@ -123,13 +127,7 @@ class ServerController {
           '${configStore.config.serverPort + maxPortAttempts - 1}');
     }
     _server = server;
-    if (candidate != configStore.config.serverPort) {
-      // Persist the actual bound port so /info + TUI reflect reality.
-      try {
-        configStore.config.serverPort = candidate;
-        configStore.save();
-      } catch (_) {}
-    }
+    _actualPort = server.port;
     _server!.listen(_handle, onError: (e) {
       // ignore: avoid_print
       print('server error: $e');
@@ -270,7 +268,8 @@ class ServerController {
       'name': 'agrout-bridge',
       'version': bridgeVersion,
       'listenAddress': configStore.config.listenAddress,
-      'serverPort': configStore.config.serverPort,
+      'serverPort': _actualPort != 0 ? _actualPort : configStore.config.serverPort,
+      'configuredPort': configStore.config.serverPort,
       'activeProfileId': configStore.config.activeProfileId,
       'proxyAuthEnabled': configStore.config.proxyAuthToken.isNotEmpty,
     }));
