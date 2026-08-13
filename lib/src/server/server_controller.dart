@@ -19,6 +19,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../models/profile.dart';
+import '../models/version.dart';
 import '../services/api_client.dart';
 import '../services/usage_store.dart';
 import '../services/waf.dart';
@@ -224,7 +225,7 @@ class ServerController {
     req.response.headers.contentType = ContentType.json;
     req.response.write(jsonEncode({
       'name': 'agrout-bridge',
-      'version': '0.1.0',
+      'version': bridgeVersion,
       'listenAddress': configStore.config.listenAddress,
       'serverPort': configStore.config.serverPort,
       'activeProfileId': configStore.config.activeProfileId,

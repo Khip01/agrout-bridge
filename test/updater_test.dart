@@ -7,91 +7,110 @@ import 'package:test/test.dart';
 
 void main() {
   late Directory tmpHome;
-  late HttpServer apiServer;
-  late int apiHits;
-  late String latestTagToReturn;
+  late String cachePath;
 
-  setUp(() async {
-    apiHits = 0;
-    latestTagToReturn = 'v9.9.9';
-
+  setUp(() {
     tmpHome = Directory.systemTemp.createTempSync('agrout-updater-test-');
     configDirOverride = tmpHome.path;
-
-    apiServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    Updater.setApiBaseForTest('http://127.0.0.1:${apiServer.port}');
-    apiServer.listen((req) async {
-      apiHits++;
-      final resp = req.response;
-      if (req.uri.path.endsWith('/releases/latest')) {
-        resp.headers.set('Content-Type', 'application/json');
-        resp.write(jsonEncode({'tag_name': latestTagToReturn}));
-      } else {
-        resp.statusCode = 404;
-      }
-      await resp.close();
-    });
+    cachePath = '${tmpHome.path}${Platform.pathSeparator}update-cache.json';
   });
 
-  tearDown(() async {
-    await apiServer.close(force: true);
+  tearDown(() {
     configDirOverride = null;
-    Updater.resetApiBaseForTest();
     if (tmpHome.existsSync()) tmpHome.deleteSync(recursive: true);
   });
 
-  test('explicit update always hits the API and refreshes the cache', () async {
-    // Seed the cache with an older tag, simulating a previous successful
-    // `update` run from within the 1-hour TTL window.
-    final updater = Updater();
-    File('${tmpHome.path}${Platform.pathSeparator}update-cache.json')
-        .writeAsStringSync(jsonEncode({
-      'tag': 'v0.1.1',
-      'at': DateTime.now().millisecondsSinceEpoch,
+  /// Stub HTTP fetcher returning [tagsJson] for the Tags endpoint and
+  /// 200/empty otherwise. Tracks every call so tests can assert which
+  /// endpoint was hit.
+  UpdaterHttpFetch stubFetch({
+    required String tagsJson,
+    int tagsStatus = 200,
+  }) {
+    return (String url, Map<String, String> headers) async {
+      if (url.contains('/tags')) {
+        return (statusCode: tagsStatus, body: tagsJson);
+      }
+      // Asset download path (not exercised by these tests).
+      return (statusCode: 404, body: '');
+    };
+  }
+
+  void seedCache(String tag, {int ageMs = 0}) {
+    File(cachePath).writeAsStringSync(jsonEncode({
+      'tag': tag,
+      'at': DateTime.now().millisecondsSinceEpoch - ageMs,
     }));
+  }
 
-    latestTagToReturn = 'v0.1.2';
-    final tag = await updater.fetchLatestTag(forceRefresh: true);
+  group('Updater.fetchLatestTag', () {
+    test('cache within TTL is served, API not called', () async {
+      seedCache('v0.1.1');
+      var calls = 0;
+      final u = Updater(httpFetch: (url, _) async {
+        calls++;
+        return (statusCode: 200, body: '[{"name":"v0.1.3"}]');
+      });
+      final tag = await u.fetchLatestTag();
+      expect(tag, equals('v0.1.1'));
+      expect(calls, equals(0));
+    });
 
-    expect(tag, equals('v0.1.2'),
-        reason: 'forceRefresh must bypass the local cache');
-    expect(apiHits, equals(1),
-        reason: 'the GitHub API must be hit even with a fresh cache');
+    test('forceRefresh bypasses a fresh cache and hits the API', () async {
+      seedCache('v0.1.1');
+      final u = Updater(httpFetch: stubFetch(tagsJson: '[{"name":"v0.1.3"},{"name":"v0.1.2"}]'));
+      final tag = await u.fetchLatestTag(forceRefresh: true);
+      expect(tag, equals('v0.1.3'));
+      // Cache should now reflect the freshly discovered tag.
+      final data = jsonDecode(File(cachePath).readAsStringSync()) as Map<String, dynamic>;
+      expect(data['tag'], equals('v0.1.3'));
+    });
 
-    final cached = File('${tmpHome.path}${Platform.pathSeparator}update-cache.json');
-    expect(cached.existsSync(), isTrue);
-    final data = jsonDecode(cached.readAsStringSync()) as Map<String, dynamic>;
-    expect(data['tag'], equals('v0.1.2'),
-        reason: 'cache must be refreshed with the real latest tag');
-  });
+    test('expired cache falls back to the network', () async {
+      // Seed cache that is older than the 1h TTL.
+      seedCache('v0.1.0', ageMs: 2 * 60 * 60 * 1000);
+      final u = Updater(httpFetch: stubFetch(tagsJson: '[{"name":"v0.1.3"}]'));
+      final tag = await u.fetchLatestTag();
+      expect(tag, equals('v0.1.3'));
+    });
 
-  test('non-forced read serves from cache when fresh', () async {
-    final updater = Updater();
-    File('${tmpHome.path}${Platform.pathSeparator}update-cache.json')
-        .writeAsStringSync(jsonEncode({
-      'tag': 'v0.1.2',
-      'at': DateTime.now().millisecondsSinceEpoch,
-    }));
+    test('picks highest stable semver, ignores prerelease tags', () async {
+      final u = Updater(httpFetch: stubFetch(tagsJson: jsonEncode([
+        {'name': 'v0.1.3-rc1'},
+        {'name': 'v0.1.3'},
+        {'name': 'v0.1.2'},
+        {'name': 'v0.1.1-beta'},
+      ])));
+      final tag = await u.fetchLatestTag(forceRefresh: true);
+      expect(tag, equals('v0.1.3'));
+    });
 
-    final tag = await updater.fetchLatestTag();
+    test('degrades to cache on API 404 instead of failing hard', () async {
+      // Mirrors the real repo state where /releases/latest (old) 404'd but
+      // /tags now returns valid data. Here we simulate the tags endpoint
+      // failing and assert the stale cache is still the fallback.
+      seedCache('v0.1.1');
+      final u = Updater(httpFetch: stubFetch(tagsJson: '', tagsStatus: 404));
+      final tag = await u.fetchLatestTag(forceRefresh: true);
+      expect(tag, equals('v0.1.1'));
+    });
 
-    expect(tag, equals('v0.1.2'));
-    expect(apiHits, equals(0),
-        reason: 'within TTL the local cache should be served');
-  });
+    test('returns null when API fails and no cache exists', () async {
+      final u = Updater(httpFetch: stubFetch(tagsJson: '', tagsStatus: 500));
+      final tag = await u.fetchLatestTag(forceRefresh: true);
+      expect(tag, isNull);
+    });
 
-  test('expired cache falls back to the network', () async {
-    final updater = Updater();
-    File('${tmpHome.path}${Platform.pathSeparator}update-cache.json')
-        .writeAsStringSync(jsonEncode({
-      'tag': 'v0.1.0',
-      'at': DateTime.now().millisecondsSinceEpoch - (2 * 60 * 60 * 1000),
-    }));
-
-    latestTagToReturn = 'v0.1.2';
-    final tag = await updater.fetchLatestTag();
-
-    expect(tag, equals('v0.1.2'));
-    expect(apiHits, equals(1));
+    test('update() uses Tags API result and reports correct latest', () async {
+      // Don't seed cache; force API success -> finds newer tag than the
+      // locally embedded 0.1.4.
+      final u = Updater(httpFetch: stubFetch(tagsJson: '[{"name":"v0.1.5"}]'));
+      final tag = await u.fetchLatestTag(forceRefresh: true);
+      expect(tag, equals('v0.1.5'));
+      // Simulate the comparison logic used by update().
+      final latest = Updater.parseSemver(tag!);
+      final current = Updater.parseSemver('0.1.4');
+      expect(Updater.compareSemver(latest!, current!), greaterThan(0));
+    });
   });
 }

@@ -13,28 +13,47 @@ class UpdateResult {
   factory UpdateResult.fail(String msg) => UpdateResult(success: false, message: msg);
 }
 
-/// Self-update: fetch latest GitHub Release tag for `Khip01/agrout-bridge`,
+/// Injectable HTTP fetcher signature. Tests inject a stub that points at a
+/// local HttpServer; production calls the default implementation which uses
+/// dart:io [HttpClient].
+typedef UpdaterHttpFetch = Future<({int statusCode, String body})> Function(
+  String url,
+  Map<String, String> headers,
+);
+
+/// Self-update: discover the latest stable tag for `Khip01/agrout-bridge`,
 /// compare to `bridgeVersion`, download the tarball asset, remove the
 /// existing npm global install, and re-run `npm install -g`.
 class Updater {
   static const _owner = 'Khip01';
   static const _repo = 'agrout-bridge';
-  // Mutable to allow tests to stub the API endpoint with a local HttpServer.
-  // Production callers never override these.
-  static String _apiBase = 'https://api.github.com';
-  static String _dlBase = 'https://github.com/$_owner/$_repo/releases/download';
+  static const _apiBase = 'https://api.github.com';
+  static const _dlBase = 'https://github.com/$_owner/$_repo/releases/download';
   static const _cacheTtlMs = 60 * 60 * 1000; // 1 hour
 
-  /// Test-only override for the API base URL. Production never calls this.
-  static void setApiBaseForTest(String base) {
-    _apiBase = base;
-    _dlBase = '$base';
-  }
+  /// Suffixes that mark a tag as a prerelease (filtered out by the updater).
+  static const _prereleaseMarkers = [
+    '-rc', '-beta', '-alpha', '-preview', '-dev',
+  ];
 
-  /// Test-only reset to the production API base URL.
-  static void resetApiBaseForTest() {
-    _apiBase = 'https://api.github.com';
-    _dlBase = 'https://github.com/$_owner/$_repo/releases/download';
+  final UpdaterHttpFetch _httpFetch;
+
+  Updater({UpdaterHttpFetch? httpFetch}) : _httpFetch = httpFetch ?? _realHttpFetch;
+
+  static Future<({int statusCode, String body})> _realHttpFetch(
+    String url,
+    Map<String, String> headers,
+  ) async {
+    final client = HttpClient();
+    try {
+      final req = await client.getUrl(Uri.parse(url));
+      headers.forEach((k, v) => req.headers.set(k, v));
+      final resp = await req.close();
+      final body = await resp.transform(utf8.decoder).join();
+      return (statusCode: resp.statusCode, body: body);
+    } finally {
+      client.close(force: true);
+    }
   }
 
   /// Read the cached latest tag if it is younger than [_cacheTtlMs].
@@ -62,6 +81,7 @@ class Updater {
     } catch (_) {}
   }
 
+  /// Invalidate the local version cache. The next `update` will refetch.
   void clearCache() {
     try {
       final f = File('${configDir()}${Platform.pathSeparator}update-cache.json');
@@ -69,35 +89,79 @@ class Updater {
     } catch (_) {}
   }
 
-  /// Fetch the latest tag from GitHub. When [forceRefresh] is true, the local
-  /// cache is bypassed and refreshed on success. The explicit `update` command
-  /// always passes `forceRefresh: true` so a user running `agrout-bridge update`
-  /// twice within the cache TTL window always sees the real latest tag.
+  static const _apiHeaders = {
+    'Accept': 'application/vnd.github+json',
+    'User-Agent': 'agrout-bridge-cli',
+  };
+
+  /// Fetch the latest stable tag from GitHub.
+  ///
+  /// Uses the **Tags API** (`/repos/.../tags`) rather than `/releases/latest`,
+  /// because GitHub's `releases/latest` endpoint returns 404 when no release
+  /// object is marked `isLatest` — a known flakiness where every release in a
+  /// repo can report `isLatest == false` while all tags + assets are present.
+  /// The Tags API is stable for any tagged release.
+  ///
+  /// Prerelease tags (`v*.*.*-rc`, `-beta`, `-alpha`, ...) are filtered out;
+  /// the highest semver among the stable tags wins.
+  ///
+  /// When [forceRefresh] is true, the local cache is bypassed and updated on
+  /// success. The explicit `update` command always passes `forceRefresh: true`
+  /// so it always reflects the real upstream truth, never a 1h-stale cache
+  /// entry (the original "Already up to date after a release" bug). On
+  /// network or API failure we degrade to the local cache rather than
+  /// hard-failing, so an offline/throttled user still gets a sensible
+  /// "already up to date" instead of "Failed to check latest version".
   Future<String?> fetchLatestTag({bool forceRefresh = false}) async {
     if (!forceRefresh) {
       final cached = _readCache();
       if (cached != null) return cached;
     }
-    try {
-      final client = HttpClient();
-      final req = await client.getUrl(Uri.parse('$_apiBase/repos/$_owner/$_repo/releases/latest'));
-      req.headers.set('Accept', 'application/vnd.github+json');
-      req.headers.set('User-Agent', 'agrout-bridge-cli');
-      final resp = await req.close();
-      if (resp.statusCode != 200) {
-        await resp.drain<void>();
-        client.close(force: true);
-        return forceRefresh ? null : _readCache();
-      }
-      final raw = await resp.transform(utf8.decoder).join();
-      client.close(force: true);
-      final data = jsonDecode(raw) as Map<String, dynamic>;
-      final tag = data['tag_name'] as String?;
-      if (tag != null) _writeCache(tag);
+    final tag = await _fetchLatestStableTag();
+    if (tag != null) {
+      _writeCache(tag);
       return tag;
-    } catch (_) {
-      return forceRefresh ? null : _readCache();
     }
+    // API/network failure: degrade gracefully to the cache so callers can
+    // still report last-known state instead of erroring.
+    return _readCache();
+  }
+
+  /// Query the GitHub Tags API and return the highest stable semver tag, or
+  /// `null` if it could not be determined (network error, non-200, empty).
+  Future<String?> _fetchLatestStableTag() async {
+    try {
+      final r = await _httpFetch('$_apiBase/repos/$_owner/$_repo/tags?per_page=100', _apiHeaders);
+      if (r.statusCode != 200) return null;
+      final data = jsonDecode(r.body);
+      if (data is! List) return null;
+      final tags = <String>[];
+      for (final t in data) {
+        if (t is Map && t['name'] is String) tags.add(t['name'] as String);
+      }
+      String? best;
+      List<int>? bestV;
+      for (final t in tags) {
+        if (_isPrereleaseTag(t)) continue;
+        final v = parseSemver(t);
+        if (v == null) continue;
+        if (best == null || compareSemver(v, bestV!) > 0) {
+          best = t;
+          bestV = v;
+        }
+      }
+      return best;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static bool _isPrereleaseTag(String tag) {
+    final lower = tag.toLowerCase();
+    for (final m in _prereleaseMarkers) {
+      if (lower.contains(m)) return true;
+    }
+    return false;
   }
 
   static List<int>? parseSemver(String v) {

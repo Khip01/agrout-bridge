@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.1.4 (2026-08-12)
+
+### Fixes
+
+- `agrout-bridge update` failed with "Failed to check latest version from
+  GitHub" even when a newer release existed. Root cause: GitHub's
+  `/releases/latest` endpoint returns HTTP 404 for this repo (no release
+  object is marked `isLatest`, a known GitHub flakiness where every
+  release reports `isLatest == false` while tags + assets are valid).
+  The updater now queries the stable Tags API
+  (`/repos/.../tags`) and picks the highest stable semver, filtering
+  prerelease tags (`-rc`, `-beta`, `-alpha`, ...). Verified live:
+  `GET /releases/latest` -> 404, `GET /tags` -> returns v0.1.0..v0.1.3.
+- Degrade gracefully on API/network failure. v0.1.3 made `update` always
+  bypass the cache (`forceRefresh`), which hard-failed when the API was
+  unreachable or 404ing. Now, if the Tags API call fails, the updater
+  falls back to the cached tag instead of erroring, so an offline or
+  throttled user still sees a sensible "already up to date" rather than
+  "Failed to check".
+- OpenCode (`@ai-sdk/openai-compatible` + `reasoning: true`) on Claude
+  models failed with `thinking.enabled is not supported for this model.
+  Use thinking.adaptive and output_config.effort...`. AgentRouter
+  routes Claude through a backend (Bedrock-style schema) that rejects
+  OpenAI-native `reasoning_effort` and Anthropic `thinking.enabled`.
+  The bridge now normalizes OpenAI `reasoning_effort` + non-standard
+  `thinking: {enabled:true}` into the Anthropic-native
+  `thinking: {type:'enabled', budget_tokens}` block for Claude-family
+  models on `/v1/chat/completions`. Verified end-to-end: a request with
+  `reasoning_effort: "high"` now streams a real Claude response (HTTP
+  200) through the bridge instead of returning the upstream schema error.
+  OpenAI/o-series reasoning is left untouched.
+- `/info` endpoint returned a hardcoded `"version": "0.1.0"` to all
+  clients, so monitoring and tooling could never tell the real version.
+  It now reports `bridgeVersion`.
+- Added regression tests `test/updater_test.dart` (Tags API fetch +
+  cache bypass + graceful fallback) and `test/reasoning_translation_test.dart`
+  (OpenAI reasoning_effort -> Anthropic thinking normalization).
+
 ## v0.1.3 (2026-08-12)
 
 ### Fixes
@@ -12,11 +50,11 @@ All notable changes to this project will be documented in this file.
   `releases/latest` lookup, so the newest tag was never queried.
   `Updater.fetchLatestTag()` now accepts a `forceRefresh` flag, and the
   explicit `update` command always passes `forceRefresh: true` so the
-  API is consulted on every user-triggered check. The cache remains in
-  place for future background polls (none are wired yet). Added a
-  regression test (`test/updater_test.dart`) using a local stub HTTP
-  server that seeds stale cache, asserts it is bypassed, and asserts
-  the cache is refreshed on success.
+  API is consulted on every user-triggered check.
+
+  NOTE: v0.1.3's `forceRefresh` alone was insufficient; it hard-failed
+  when `/releases/latest` returned 404 (see v0.1.4). v0.1.4 additionally
+  switches to the Tags API and adds graceful cache fallback.
 
 ## v0.1.2 (2026-08-12)
 

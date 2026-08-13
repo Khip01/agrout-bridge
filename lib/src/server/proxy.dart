@@ -97,8 +97,33 @@ Future<void> proxyRequest({
     if (bodyBytes.isNotEmpty) {
       try {
         final parsed = jsonDecode(utf8.decode(bodyBytes));
-        if (parsed is Map && parsed['model'] is String) model = parsed['model'] as String;
-        if (parsed is Map && parsed['stream'] == true) streaming = true;
+        if (parsed is Map) {
+          final body = Map<String, dynamic>.from(parsed);
+          if (body['model'] is String) model = body['model'] as String;
+          if (body['stream'] == true) streaming = true;
+          // Normalize OpenAI-native reasoning params into the Anthropic-native
+          // `thinking` block for Claude-family models.
+          //
+          // OpenCode's `@ai-sdk/openai-compatible` (baseURL .../v1) emits
+          // `reasoning_effort: "high"` per the OpenAI schema. AgentRouter routes
+          // Claude requests to a backend whose schema rejects
+          // `thinking.enabled` / `reasoning_effort` and instead wants
+          // `output_config.effort` / `thinking.adaptive`. Forwarding the OpenAI
+          // body verbatim therefore errors server-side with:
+          //   "thinking.enabled is not supported for this model. Use
+          //    thinking.adaptive and output_config.effort..."
+          // We verified agentrouter.org accepts Anthropic-native
+          // `thinking: { type: "enabled", budget_tokens }` (HTTP 200), so we
+          // translate here. We only touch Claude-family models so native
+          // OpenAI reasoning (e.g. o-series) is left intact for those routes.
+        if (format == StreamFormat.openai && model != null) {
+          if (normalizeReasoning(model, body)) {
+              bodyBytes
+                ..clear()
+                ..addAll(utf8.encode(jsonEncode(body)));
+            }
+          }
+        }
       } catch (_) {}
     }
 
@@ -238,6 +263,64 @@ void _copyHeaders(HttpHeaders src, HttpHeaders dst, {required bool streaming}) {
     dst.set('Cache-Control', 'no-cache');
     dst.set('Connection', 'keep-alive');
   }
+}
+
+/// Models that are Claude-family on the upstream. The OpenAI-compatible
+/// endpoint emits OpenAI-native `reasoning_effort`, which agentrouter.org
+/// routes to a backend that rejects it. For these models we normalize to the
+/// Anthropic-native `thinking` block instead.
+final claudeModelRegex = RegExp(r'^claude-');
+
+bool looksLikeClaude(String model) {
+  final m = claudeModelRegex.firstMatch(model);
+  return m != null;
+}
+
+/// Map OpenAI `reasoning_effort` ("low"/"medium"/"high"/"none") onto an
+/// Anthropic-native `thinking` block, mutating [body] in place.
+///
+/// Anthropic extended thinking requires `budget_tokens` > 0; we also strip
+/// the non-standard field so it is not forwarded verbatim.
+///
+/// `thinking: {enabled:true,...}` (non-standard) is normalized to
+/// `{type:'enabled', budget_tokens}` if present.
+///
+/// Returns `true` if the body was mutated.
+bool normalizeReasoning(String model, Map<String, dynamic> body) {
+  if (!looksLikeClaude(model)) return false;
+  var changed = false;
+  final effort = body['reasoning_effort'];
+  if (effort is String) {
+    final budget = switch (effort) {
+      'low' => 1024,
+      'medium' => 4096,
+      'high' => 8192,
+      'none' => null,
+      _ => null,
+    };
+    if (budget != null) {
+      body['thinking'] = {'type': 'enabled', 'budget_tokens': budget};
+      changed = true;
+    } else if (effort == 'none') {
+      // Explicitly requested no reasoning: ensure no thinking block.
+      body.remove('thinking');
+      changed = true;
+    }
+    body.remove('reasoning_effort');
+    changed = true;
+  } else if (body['thinking'] is Map && (body['thinking'] as Map).containsKey('enabled')) {
+    // Normalize non-standard {enabled:true,...} to Anthropic official
+    // {type:'enabled', budget_tokens} if budget_tokens present.
+    final thinking = Map<String, dynamic>.from(body['thinking'] as Map);
+    if (thinking['enabled'] == true) {
+      thinking.remove('enabled');
+      thinking['type'] = 'enabled';
+      if (thinking['budget_tokens'] == null) thinking['budget_tokens'] = 1024;
+      body['thinking'] = thinking;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 /// Pull input/output/cache tokens + total cost from a non-streaming response

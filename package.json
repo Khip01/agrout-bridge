@@ -1,6 +1,6 @@
 {
   "name": "agrout-bridge",
-  "version": "0.1.3",
+  "version": "0.1.4",
 
   "description": "AgentRouter bridge with TUI dashboard. OpenAI- and Anthropic-compatible local proxy that spoofs Claude Code headers to bypass the upstream client-detection gate.",
   "type": "module",
