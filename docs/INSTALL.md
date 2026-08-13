@@ -110,6 +110,11 @@ cd agrout-bridge
 Requires Dart SDK 3.10+ and Node.js 18+ (Node only needed for the npm
 launcher wrapper).
 
+If port `8318` is already in use (e.g. a stale bridge process), the server
+auto-increments to the next free port and persists it — check the actual
+listen port with `curl http://127.0.0.1:8318/info || curl
+http://127.0.0.1:8319/info`.
+
 ## Platform support
 
 | Platform | Status | Clipboard | Build |

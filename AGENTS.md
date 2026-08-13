@@ -225,6 +225,41 @@ OpenCode (OpenAI compatible) configuration:
 }
 ```
 
+## Handling upstream content-blocked
+
+When OpenCode/Claude Code sessions grow very large (common with big
+codebases), agentrouter.org's input content filter can reject the request
+with `402 Budget pool quota has been exhausted` or a soft
+`content-blocked` / `sensitive_words` mid-stream line. The bridge
+mitigates the most common false positives before forwarding — see
+`CHANGELOG.md` v0.1.6 and `docs/ARCHITECTURE.md` (spoof invariants):
+
+1. **System-prompt stripping.** The large OpenCode/Claude Code system
+   message injects repeating context blocks
+   (`<memory_blocks>`, `<available_skills>`, `<memory_instructions>`,
+   `<journal_instructions>`). The bridge strips these tags and hard-caps
+   any single system message at 8000 chars before forwarding, since these
+   are the largest contributors to false-positive content filtering. Only
+   `role: system` is trimmed — all user/assistant content is forwarded
+   verbatim.
+2. **Accepted client fingerprint.** Upstream only lets specific
+   `User-Agent`s through (see docs/ARCHITECTURE.md). The bridge spoofs
+   `opencode/1.0` (OpenAI path) and `claude-cli/2.1.92` (Anthropic path).
+3. **SSE passthrough.** In streaming mode, mid-stream
+   `content_blocked` / `sensitive_words` / `billing.summary` / `data: null`
+   lines are dropped (logged to the activity log) instead of aborting the
+   stream, so OpenCode keeps receiving partial responses.
+4. **Port auto-increment.** If `8318` is occupied by a stale bridge
+   process, `ServerController.start()` retries the next free port
+   (8318 -> 8319 -> 8320, bounded to 25 attempts) and persists the bound
+   port into the config store so `/info`, `/health` and the TUI report the
+   actual listen address.
+
+If you still hit a hard `content-blocked`, it is an upstream policy
+decision, not a bridge bug — request a budget-policy/quota adjustment on
+your AgentRouter account or route Claude traffic directly via a non-
+AgentRouter provider.
+
 ## Port
 
 Default port: `8318` (continuity with the upstream agentrouter-spoof-proxy).

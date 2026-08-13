@@ -110,19 +110,20 @@ The Claude Code fingerprint in `services/spoof.dart` is the load-bearing
 piece of the upstream gate. The current set was verified live on
 2026-08-12 against `https://agentrouter.org`:
 
-- `User-Agent: claude-cli/2.1.92 (external, sdk-cli)`
-- `X-App: cli`
-- `X-Stainless-*` (`Arch`, `Lang`, `Os`, `Package-Version`, `Runtime`,
-  `Runtime-Version`, `Helper-Method`, `Retry-Count`, `Timeout`)
-- `Anthropic-Version: 2023-06-01`
-- `Anthropic-Beta: claude-code-20250219, oauth-2025-04-20, …`
-- `Anthropic-Dangerous-Direct-Browser-Access: true`
+- `User-Agent: claude-cli/2.1.92 (external, sdk-cli)` (Anthropic Messages path `/v1/messages`, set in `services/spoof.dart`)
+- `User-Agent: opencode/1.0` (OpenAI-compatible path `/v1/chat/completions`, set in `server/proxy.dart`)
 
-If the upstream gate rotates (e.g. it stops trusting `claude-cli/2.1.92`),
-the failure mode is `401 unauthorized client detected` for every chat
-request. The fix is a one-line bump in `spoof.dart` plus a re-verify
-against `/v1/models`. The live smoke test in `test/live_smoke_test.dart`
-is the single source of truth for that regression.
+Both are verified accepted by the agentrouter.org client-fingerprint
+layer. A bare SDK UA (e.g. `Dart/3.x` for `/v1/chat/completions`, or the
+default `HttpClient` UA) is rejected with `401 unauthorized client
+detected` even with a valid chat key; `claude/*` and `Codex/*` spoofs are
+also rejected. So the two spoofing values above are, as of 2026-08-13, the
+minimal set that pass. If the upstream gate rotates, the failure mode is
+`401 unauthorized client detected` for every request on the affected path.
+The fix is a one-line bump in `spoof.dart` (for `/v1/messages`) or
+`server/proxy.dart` (for `/v1/chat/completions`), then re-verify against
+`/v1/models`. The live smoke test in `test/live_smoke_test.dart` is the
+single source of truth for that regression.
 
 ## Login flow
 
