@@ -129,9 +129,8 @@ single source of truth for that regression.
 
 AgentRouter has no username/password registration: accounts are created and
 signed into exclusively through provider OAuth (GitHub or LinuxDO). The
-local sign-in flow therefore opens the provider authorize URL and either
-auto-captures the session via a redirect bounce-back, or accepts a pasted
-API key / session token as a fallback.
+local sign-in flow opens the provider authorize URL and accepts a pasted
+API key / session token.
 
 ```
 TUI [l]  ──> LoginFlow.start()           ──>  HttpServer.bind(127.0.0.1, ephemeral)
@@ -140,16 +139,10 @@ Browser  ──> GET  http://127.0.0.1:.../login  <──┤  serve OAuth page (
 Browser  ──> GET  .../oauth/github          <──┤  LoginFlow._handleOAuth
                                              │    ├─  GET /api/oauth/state?mode=login   -> signed state token
                                              │    ├─  GET /api/status                   -> github_client_id / linuxdo_client_id
-                                             │    └─  302 -> provider authorize URL with redirect_uri
+                                             │    └─  302 -> provider authorize URL (state carried)
                                              │         github:  https://github.com/login/oauth/authorize
                                              │         linuxdo: https://connect.linux.do/oauth2/authorize
-                                             │         redirect_uri = http://127.0.0.1:<port>/oauth/callback
-Provider --> GET  .../oauth/callback?code&state <──┤  LoginFlow._handleOAuthCallback
-                                             │    ├─  GET /api/oauth/<provider>?code&state&mode=login
-                                             │    ├─  capture session token (Set-Cookie session-token)
-                                             │    ├─  best-effort GET /api/user/self (quota / used_quota)
-                                             │    └─  Profile.upsert(authToken + accountInfo)  (auto, no paste)
-Browser  ──> POST .../login/token          <──┤  LoginFlow._handleTokenSubmit (fallback)
+Browser  ──> POST .../login/token          <──┤  LoginFlow._handleTokenSubmit
                                              │    ├─  validate against GET /v1/models (accepts API key)
                                              │    └─  Profile.upsert(apiKey)  (best-effort /api/user/self)
 
@@ -158,13 +151,30 @@ Browser  ──> GET  /success                <──┤  LoginFlow._serveSucces
 TUI       <──  onResult(LoginOutcome)     <──┘  panel updates, [Esc] closes the server
 ```
 
-The auto-capture path bounces the provider redirect back to the bridge's own
-`/oauth/callback` (a `redirect_uri` on `127.0.0.1`), so the code never lands
-on agentrouter.org and the bridge exchanges it for the session directly.
-Dashboard API keys are validated against `/v1/models` (the check that
-accepts them); `/api/user/self` is best-effort enrichment only, since that
-session-only endpoint rejects API keys with "access token 无效". Tokens
-never leave the profile JSON (mode `0600`) and are never logged.
+The provider OAuth cookie is set on the agentrouter.org domain, so the local
+bridge can never read it; that is why the flow ends with a manual token
+paste. The bridge tried bouncing the provider redirect back to its own
+`/oauth/callback` with a `redirect_uri` on `127.0.0.1`, but GitHub rejects
+any `redirect_uri` that is not registered on the AgentRouter OAuth app, so
+auto-capture is not possible. Dashboard API keys are validated against
+`/v1/models` (the check that accepts them); `/api/user/self` is best-effort
+enrichment only, since that session-only endpoint rejects API keys with
+"access token 无效". Tokens never leave the profile JSON (mode `0600`) and
+are never logged.
+
+## Billing info (API key only)
+
+New API panels expose OpenAI-style billing endpoints that accept a plain
+dashboard API key (no session token):
+
+```
+GET /v1/dashboard/billing/subscription   -> soft_limit_usd / hard_limit_usd
+GET /v1/dashboard/billing/usage?start_date&end_date -> total_usage + daily_costs
+```
+
+The TUI Profile page calls both with the active profile's `apiKey` on
+startup and on `[r]`, so credit/consumption are visible without any OAuth
+sign-in.
 
 ## State locations
 

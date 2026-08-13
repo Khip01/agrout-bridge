@@ -17,8 +17,13 @@ sign-in flow. AgentRouter has no username/password registration, so the
 sign-in page opens provider OAuth (GitHub / LinuxDO) and accepts a pasted
 API key / session token; credentials login is not supported. The pasted
 value is validated against `/v1/models` (accepts dashboard API keys) and
-stored as the profile `apiKey`; the provider buttons auto-capture a session
-token by bouncing the OAuth redirect back to the bridge's `/oauth/callback`.
+stored as the profile `apiKey`. The Profile page shows credit/usage fetched
+with the API key from the OpenAI-style billing endpoints
+(`/v1/dashboard/billing/subscription` and `/v1/dashboard/billing/usage`),
+so no session token is required to see quota or consumption. Provider OAuth
+runs in the browser; the session token is pasted back into the local page
+(the bridge cannot read the agentrouter session cookie, and GitHub rejects
+a `redirect_uri` that is not registered on the AgentRouter OAuth app).
 
 ```
 agrout-bridge profile add <name>      # prompt for key

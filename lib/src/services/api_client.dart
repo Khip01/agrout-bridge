@@ -33,6 +33,8 @@ class AgentRouterPaths {
   static const userSelf = '/api/user/self';
   static const userSubscription = '/api/user/subscription';
   static const userDashboard = '/api/user/dashboard';
+  static const billingSubscription = '/v1/dashboard/billing/subscription';
+  static const billingUsage = '/v1/dashboard/billing/usage';
 }
 
 /// Successful warmup result: the merged cookie map (freshly captured WAF
@@ -41,40 +43,6 @@ class WarmupResult {
   final Map<String, String> cookies;
   final int statusCode;
   WarmupResult(this.cookies, this.statusCode);
-}
-
-/// Result of exchanging a provider OAuth code. [sessionToken] is populated
-/// from the session cookie New API issues on the callback.
-class OauthExchangeResult {
-  final bool success;
-  final String? sessionToken;
-  final Map<String, dynamic>? accountInfo;
-  final String? message;
-  final int statusCode;
-  OauthExchangeResult({
-    required this.success,
-    this.sessionToken,
-    this.accountInfo,
-    this.message,
-    required this.statusCode,
-  });
-}
-
-/// Extract the session token from a `Set-Cookie` header list (New API names
-/// it `session-token`). Returns null when absent.
-String? extractSessionCookie(List<String>? setCookie) {
-  if (setCookie == null) return null;
-  for (final raw in setCookie) {
-    final pair = raw.split(';').first;
-    final eq = pair.indexOf('=');
-    if (eq <= 0) continue;
-    final name = pair.substring(0, eq).trim();
-    if (name.toLowerCase() == 'session-token' || name.toLowerCase() == 'session_token') {
-      final v = pair.substring(eq + 1).trim();
-      if (v.isNotEmpty) return v;
-    }
-  }
-  return null;
 }
 
 /// Result of `POST /api/user/login`. Either [success] is true and
@@ -254,6 +222,32 @@ class AgentRouterClient {
         .toList(growable: false);
   }
 
+  /// `GET /v1/dashboard/billing/subscription` — the OpenAI-style billing
+  /// endpoint that New API panels expose to a plain API key (no session
+  /// token needed). Returns quota limits (soft_limit_usd / hard_limit_usd).
+  Future<Map<String, dynamic>> fetchBillingSubscription({
+    required String apiKey,
+  }) async {
+    return getJson(
+      path: AgentRouterPaths.billingSubscription,
+      authHeader: 'Bearer $apiKey',
+    );
+  }
+
+  /// `GET /v1/dashboard/billing/usage?start_date&end_date` — OpenAI-style
+  /// usage endpoint that New API panels expose to a plain API key. Returns
+  /// `total_usage` (aggregate) and per-date `daily_costs` when present.
+  Future<Map<String, dynamic>> fetchBillingUsage({
+    required String apiKey,
+    required String startDate,
+    required String endDate,
+  }) async {
+    return getJson(
+      path: '${AgentRouterPaths.billingUsage}?start_date=$startDate&end_date=$endDate',
+      authHeader: 'Bearer $apiKey',
+    );
+  }
+
   /// `POST /api/user/login` — warmup the cookie jar first, then carry those
   /// cookies into the login POST so the upstream CSRF / first-party checks
   /// see a normal visitor session.
@@ -360,51 +354,6 @@ class AgentRouterClient {
       path: AgentRouterPaths.userSelf,
       authHeader: 'Bearer $sessionToken',
       cookies: cookies,
-    );
-  }
-
-  /// `GET /api/oauth/<provider>?code=...&state=...&mode=login` — exchange a
-  /// provider OAuth code (from a redirect_uri bounce-back) for the session
-  /// payload. The response `data` is the user object, and the session token
-  /// is available from the `Set-Cookie` headers (New API issues it as a
-  /// session cookie). This lets the local bridge complete a full provider
-  /// sign-in without any manual paste.
-  Future<OauthExchangeResult> exchangeOauthCode({
-    required String code,
-    required String state,
-  }) async {
-    final resp = await send(
-      method: 'GET',
-      path: '/api/oauth/github?code=$code&state=$state&mode=login',
-      extraHeaders: const {},
-    );
-    final body = await resp.transform(utf8.decoder).join();
-
-    // New API issues the session via `Set-Cookie` on this callback.
-    String? sessionToken = extractSessionCookie(resp.headers['set-cookie']);
-    Map<String, dynamic>? info;
-    String? message;
-    try {
-      final parsed = jsonDecode(body);
-      if (parsed is Map) {
-        if (parsed['success'] != true) {
-          message = parsed['message']?.toString() ?? 'OAuth exchange failed';
-        }
-        final data = parsed['data'];
-        if (data is Map) info = data.cast<String, dynamic>();
-        final tok = data is Map ? data['token']?.toString() : null;
-        sessionToken ??= tok;
-      }
-    } catch (_) {
-      message = body.isEmpty ? 'HTTP ${resp.statusCode}' : body;
-    }
-
-    return OauthExchangeResult(
-      success: sessionToken != null && message == null,
-      sessionToken: sessionToken,
-      accountInfo: info,
-      message: message,
-      statusCode: resp.statusCode,
     );
   }
 

@@ -83,11 +83,8 @@ void main() {
     expect(loc, startsWith('https://github.com/login/oauth/authorize'));
     expect(loc, contains('client_id=mockgithubid'));
     expect(loc, contains('state=mock-state-token'));
-    expect(loc, contains('redirect_uri='),
-        reason: 'must bounce back to the local bridge callback, not agentrouter');
-    final decodedCallback = Uri.decodeFull(loc.split('redirect_uri=').last);
-    expect(decodedCallback, startsWith('http://127.0.0.1:${parsed.port}/oauth/callback'),
-        reason: 'provider must redirect to the bridge /oauth/callback');
+    expect(loc, isNot(contains('redirect_uri')),
+        reason: 'GitHub rejects unregistered redirect_uri; provider must redirect to agentrouter.org');
     await flow.stop();
     await mock.close(force: true);
   });
@@ -128,47 +125,6 @@ void main() {
     // fetchSelf rejected the API key (session-only endpoint) but that is a
     // best-effort enrichment, not a login failure.
     expect(outcome!.accountInfo, isNull);
-    await flow.stop();
-    await mock.close(force: true);
-  });
-
-  test('GET /oauth/callback exchanges code into a session token', () async {
-    // Mock agentrouter: /api/oauth/github exchanges code->session and sets a
-    // session-token cookie; /api/user/self returns quota info.
-    final mock = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    mock.listen((req) {
-      if (req.uri.path == '/api/oauth/github' &&
-          req.uri.queryParameters['code'] == 'validcode' &&
-          req.uri.queryParameters['state'] == 's3cret') {
-        req.response.headers.set('Set-Cookie', 'session-token=sk-session123; Path=/');
-        req.response.headers.contentType = ContentType.json;
-        req.response.write('{"success":true,"data":{"username":"khip","id":1}}');
-      } else if (req.uri.path == '/api/user/self') {
-        req.response.headers.contentType = ContentType.json;
-        req.response.write(
-            '{"success":true,"data":{"username":"khip","quota":500000,"used_quota":120000}}');
-      } else {
-        req.response.statusCode = 404;
-      }
-      req.response.close();
-    });
-
-    final flow = LoginFlow(AgentRouterClient(baseUrl: 'http://127.0.0.1:${mock.port}'));
-    LoginOutcome? outcome;
-    final url = await flow.start(onResult: (o) => outcome = o);
-    final parsed = Uri.parse(url).replace(path: '/oauth/callback');
-    final uri = parsed.replace(queryParameters: {'code': 'validcode', 'state': 's3cret'});
-
-    final sock = await Socket.connect(uri.host, uri.port);
-    sock.write('GET ${uri.path}?${uri.query} HTTP/1.1\r\nHost: ${uri.host}:${uri.port}\r\nConnection: close\r\n\r\n');
-    await for (final _ in sock) {}
-    await sock.close();
-
-    expect(outcome, isNotNull);
-    expect(outcome!.success, isTrue);
-    expect(outcome!.sessionToken, 'sk-session123');
-    expect(outcome!.accountInfo, isNotNull);
-    expect(outcome!.accountInfo!['username'], 'khip');
     await flow.stop();
     await mock.close(force: true);
   });

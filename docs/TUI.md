@@ -27,7 +27,7 @@ log is a sidebar, fullscreen log when toggled.
 
 | Key | Page | Data |
 |-----|------|------|
-| `1` | Profile | Active profile, key (masked), login state, account info (when logged-in), list of all profiles |
+| `1` | Profile | Active profile, key (masked), login state, billing quota/usage (via API key), account info (when logged-in), list of all profiles |
 | `2` | Usage & Cost | Total / success / streamed request counts, success rate, tokens (in/out/cache), cumulative cost, per-model breakdown |
 | `3` | Models | Live model list. Press `Enter` on a model to copy its id. |
 | `4` | Proxy Config | Port, listen address, uptime, active streams, circuit state, WAF cookie entries, model health failures |
@@ -76,11 +76,10 @@ log is a sidebar, fullscreen log when toggled.
 shows the URL. The user opens it in any browser and signs in through
 provider OAuth. AgentRouter has no username/password registration, so
 the local page shows "Sign in with GitHub" and "Sign in with LinuxDO"
-buttons. Each opens the real provider authorize URL (state token from
-`/api/oauth/state`, client id from `/api/status`) with `redirect_uri`
-pointing back at the bridge's own `/oauth/callback`. After the user
-approves the provider in the browser, the bridge exchanges the code for
-a session token automatically (no paste), then:
+buttons, each opening the real provider authorize URL (state token from
+`/api/oauth/state`, client id from `/api/status`). After completing
+sign-in in the browser the user pastes the resulting session token /
+API key into the local page, and the bridge:
 
 1. Best-effort: fetches `/api/user/self` to populate the Profile page
    with username / email / quota.
@@ -89,6 +88,12 @@ a session token automatically (no paste), then:
 The page also has a paste field as a fallback. Pasting a dashboard API
 key (`sk-...`) works directly: it is validated against `/v1/models` and
 stored as the profile's API key.
+
+Note: the bridge cannot auto-capture the session. The provider OAuth
+cookie is set on the agentrouter.org domain, and GitHub rejects a
+`redirect_uri` that is not registered on the AgentRouter OAuth app, so a
+manual paste is required. Credit and usage are available from the API key
+alone via the billing endpoints (see Profile page), no session needed.
 
 Keymap (active while the panel is open):
 

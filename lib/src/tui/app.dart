@@ -44,6 +44,9 @@ class AppState extends State<AgroutApp> {
   int _selectedModelIndex = 0;
   bool _loadingModels = false;
 
+  Map<String, dynamic>? _billing;
+  bool _loadingBilling = false;
+
   final _portCtrl = TextEditingController();
   bool _portScanDone = false;
   final Map<int, bool> _portStatus = {};
@@ -66,6 +69,7 @@ class AppState extends State<AgroutApp> {
     LogStore.init();
     LogStore.info('agrout-bridge starting...');
     _startPageRefresh();
+    unawaited(_refreshBilling());
   }
 
   @override
@@ -257,6 +261,38 @@ class AppState extends State<AgroutApp> {
     } finally {
       _loadingModels = false;
     }
+    unawaited(_refreshBilling());
+  }
+
+  Future<void> _refreshBilling() async {
+    final id = _config.config.activeProfileId;
+    final p = id == null ? null : _profiles.byId(id);
+    if (p == null || p.apiKey.isEmpty) {
+      _billing = null;
+      return;
+    }
+    if (_loadingBilling) return;
+    _loadingBilling = true;
+    try {
+      final client = AgentRouterClient();
+      final today = DateTime.now();
+      final start = DateTime(today.year, today.month, today.day - 30);
+      String fmt(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
+          '${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+      final sub = await client.fetchBillingSubscription(apiKey: p.apiKey);
+      final usage = await client.fetchBillingUsage(
+        apiKey: p.apiKey,
+        startDate: fmt(start),
+        endDate: fmt(today),
+      );
+      _billing = {'subscription': sub, 'usage': usage};
+    } catch (e) {
+      _billing = null;
+      _setStatus('Billing fetch failed: $e', duration: 3);
+    } finally {
+      _loadingBilling = false;
+      if (mounted) setState(() {});
+    }
   }
 
   void _copyEndpoint({required bool openai}) {
@@ -365,6 +401,13 @@ class AppState extends State<AgroutApp> {
       _kv('API key', p == null ? '-' : _mask(p.apiKey)),
       _kv('Created', p?.createdAt.toIso8601String().substring(0, 10) ?? '-'),
       _kv('Logged in', p == null ? '-' : (p.isLoggedIn ? 'yes' : 'no')),
+      if (_billing != null) ...[
+        _section('Billing (via API key)'),
+        _kv('Soft limit (quota)', _fmtLimit(_billing!['subscription']?['soft_limit_usd'])),
+        _kv('Hard limit', _fmtLimit(_billing!['subscription']?['hard_limit_usd'])),
+        _kv('Used (last 30d)', _fmtUsed(_billing!['usage']?['total_usage'])),
+      ] else if (_loadingBilling)
+        Text('Fetching billing...', style: TextStyle(color: Colors.grey)),
       if (p?.isLoggedIn == true) ...[
         _kv('Auth token at', p!.authTokenAt?.toIso8601String().substring(0, 19) ?? '-'),
         if (p.accountInfo != null) ...[
@@ -386,6 +429,17 @@ class AppState extends State<AgroutApp> {
       if (_profiles.all.isEmpty)
         Text('No profiles. Run `agrout-bridge profile add <name> <key>` then restart.', style: TextStyle(color: Colors.grey)),
     ];
+  }
+
+  String _fmtLimit(dynamic v) {
+    if (v is! num) return '-';
+    if (v >= 100000000) return 'unlimited';
+    return v.toStringAsFixed(2);
+  }
+
+  String _fmtUsed(dynamic v) {
+    if (v is! num) return '-';
+    return v.toStringAsFixed(4);
   }
 
   List<Component> _usageRows() {

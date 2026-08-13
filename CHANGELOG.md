@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.1.9 (2026-08-13)
+
+### Fixes
+
+- **Billing info on the TUI Profile page, API key only.** New API panels
+  expose OpenAI-style billing endpoints that work with a plain dashboard
+  API key, no session token needed. The Profile page now fetches
+  `GET /v1/dashboard/billing/subscription` (soft/hard quota) and
+  `GET /v1/dashboard/billing/usage` (total usage over the last 30 days)
+  with the active profile's API key, so credit and consumption are visible
+  without any OAuth sign-in. Triggered on startup and on `[r]`.
+
+### Removed
+
+- Auto-capture of the provider OAuth session is removed. The bridge tried
+  bouncing the GitHub / LinuxDO redirect back to its own `/oauth/callback`
+  via a `redirect_uri` on `127.0.0.1`, but GitHub rejects any
+  `redirect_uri` that is not registered on the AgentRouter OAuth app
+  ("Be careful! The redirect_uri is not associated with this application").
+  The provider buttons now redirect to the provider only, and the session
+  token is pasted manually, exactly like v0.1.7. Credit/usage does not need
+  a session token anyway (see billing endpoints above).
+
+### Internal
+
+- `test/billing_test.dart`: mock-driven tests for the two billing
+  endpoints (Bearer header, date-range query).
+- `test/login_serve_test.dart`: OAuth redirect assert now expects NO
+  `redirect_uri`; the callback-exchange test is removed.
+- `dart analyze`: 0 issues. Full non-live suite: 66 tests pass.
+
 ## v0.1.8 (2026-08-13)
 
 ### Fixes
@@ -14,18 +45,16 @@
   API key) and stored as the profile's `apiKey`; account-info enrichment
   via `/api/user/self` is best-effort only.
 - **Auto-capture provider OAuth** (no manual paste). The "Sign in with
-  GitHub" / "Sign in with LinuxDO" buttons now bounce the provider back to
-  the bridge's own `/oauth/callback` (via `redirect_uri` pointing at the
-  local server) instead of agentrouter.org. The bridge exchanges the code
-  at `GET /api/oauth/github?code=...&state=...&mode=login`, captures the
-  session token New API issues, and stores it automatically. Requires one
-  interactive provider approval in the browser, exactly like 9Router.
+  GitHub" / "Sign in with LinuxDO" buttons bounce the provider back to the
+  bridge's own `/oauth/callback` (via `redirect_uri` on `127.0.0.1`) and
+  exchange the code for a session token. Note: removed in v0.1.9 because
+  GitHub rejects a `redirect_uri` not registered on the AgentRouter OAuth
+  app.
 
 ### Internal
 
 - `test/login_serve_test.dart`: added mock-driven tests for API-key
-  validation via `/v1/models` and OAuth code->session exchange via the
-  callback route.
+  validation via `/v1/models` and OAuth code->session exchange.
 - `dart analyze`: 0 issues. Full non-live suite: 65 tests pass.
 
 ## v0.1.7 (2026-08-13)
