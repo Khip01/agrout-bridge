@@ -124,13 +124,16 @@ Measured and recommended values (OpenAI-compatible provider block in
 
 | Model | Measured ceiling (cold) | Recommended declared limit | Output |
 |---|---|---|---|
-| `gpt-5.6-sol` | ~425k tokens (504 beyond) | context `420000`, input `420000` | `8192` |
-| `claude-opus-5` | not cold-tested; assume ~500k | context `480000`, input `480000` | `8192` |
-| `claude-opus-4-8` | not cold-tested; assume ~500k | context `480000`, input `480000` | `8192` |
+| `gpt-5.6-sol` | **~432k** (1730-turn OK at 123s first event; 437k = 504) | context `420000`, input `420000` | `8192` |
+| `claude-opus-5` | not measurable while its budget pool is exhausted (402) | context `480000`, input `480000` | `8192` |
+| `claude-opus-4-8` | not measurable while its budget pool is exhausted (402) | context `480000`, input `480000` | `8192` |
 
 The recommended limit keeps a safety margin below the ceiling: the client
 starts auto-compaction while the request still fits, instead of the gateway
-returning 504. Verify per model by sending a single large cold request and
+returning 504. The `gpt-5.6-sol` cold ceiling of ~432k already produced its
+first stream event at 123s, right at the ~120s gateway timeout, so the
+declared 420k limit leaves a meaningful safety band for upstream load
+variation. Verify per model by sending a single large cold request and
 recording the largest size that returns 200 before 504; then set the
 declared limit ~5-10% below it.
 
