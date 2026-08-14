@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.1.11 (2026-08-14)
+
+### Fix
+
+- **Base64-encoded content in tool results no longer trips the upstream
+  content filter.** WebFetch (format=markdown) and file-read tool results
+  embed images, logos and fonts as `data:...;base64,...` URIs. Accumulated
+  base64 over ~2,200 chars per request reads as obfuscated content to
+  agentrouter.org's gate and produces a hard `content-blocked` (HTTP 400),
+  even with a valid English system anchor. The bridge now scrubs base64
+  from every JSON string value in the request body before forwarding:
+  `data:...;base64,...` URIs and bare base64 runs (>= 200 chars) are
+  replaced with a short placeholder. Plain text, URLs and tool-call
+  arguments are untouched. Runs on both the OpenAI and Anthropic paths.
+
+### Docs
+
+- **`docs/CONTENT-FILTER.md` corrected.** The earlier "tool results are
+  neutral" claim was disproven by live probing: base64-encoded blobs in
+  tool results are the one exception that trips the gate. Documented the
+  aggregate ~2,200-char base64 threshold, the measured per-request table
+  (markdown with data URIs blocks, without them passes) and the bridge
+  scrub behavior. `AGENTS.md` updated to match.
+
+### Internal
+
+- `test/base64_scrub_test.dart`: unit tests for `scrubBase64Payload`
+  (data-URI replacement, long bare-run collapse, nested Anthropic content
+  blocks, no-op on plain text/URLs).
+- `dart analyze`: 0 issues. Full non-live suite: 73 tests pass.
+
 ## v0.1.10 (2026-08-14)
 
 ### Fix

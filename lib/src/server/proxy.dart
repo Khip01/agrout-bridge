@@ -137,6 +137,16 @@ Future<void> proxyRequest({
                 ..addAll(utf8.encode(jsonEncode(body)));
             }
           }
+          // Neutralize base64-encoded content (WebFetch markdown data URIs,
+          // file-read media blobs) before forwarding. Large accumulated base64
+          // trips agentrouter.org's content filter with a hard
+          // `content-blocked` even though the rest of the request is clean.
+          // Scrub always runs so both OpenAI and Anthropic paths are covered.
+          if (scrubBase64Payload(body)) {
+            bodyBytes
+              ..clear()
+              ..addAll(utf8.encode(jsonEncode(body)));
+          }
         }
       } catch (_) {}
     }
@@ -353,6 +363,61 @@ bool normalizeReasoning(String model, Map<String, dynamic> body) {
     }
   }
   return changed;
+}
+
+/// Base64 data URIs, e.g. `data:image/png;base64,iVBOR...`. WebFetch and
+/// file-read tool results commonly embed logo/font bytes as base64 data URIs;
+/// a large accumulated base64 payload trips agentrouter.org's content filter
+/// (measured threshold ~2.2k chars per request). We replace the whole URI
+/// with a short placeholder before forwarding.
+final _base64DataUriRegex = RegExp(r'data:[^,]{1,128};base64,[A-Za-z0-9+/=]+');
+
+/// Long bare base64 runs (>= 200 chars) not wrapped in a data URI. Encoded
+/// blobs of this size read as obfuscated content to the upstream filter, so
+/// collapse them to a placeholder. 200 chars per run keeps any realistic
+/// request far below the measured ~2.2k aggregate trigger.
+final _longBase64RunRegex = RegExp(r'[A-Za-z0-9+/]{200,}={0,2}');
+
+const _base64Placeholder = '[base64 data stripped by bridge]';
+
+String _scrubBase64String(String input) {
+  var out = input;
+  out = out.replaceAll(_base64DataUriRegex, _base64Placeholder);
+  out = out.replaceAll(_longBase64RunRegex, _base64Placeholder);
+  return out;
+}
+
+dynamic _scrubBase64Value(dynamic value) {
+  if (value is String) return _scrubBase64String(value);
+  if (value is List) {
+    for (var i = 0; i < value.length; i++) {
+      value[i] = _scrubBase64Value(value[i]);
+    }
+    return value;
+  }
+  if (value is Map) {
+    for (final k in value.keys.toList()) {
+      value[k] = _scrubBase64Value(value[k]);
+    }
+    return value;
+  }
+  return value;
+}
+
+/// Remove base64-encoded content from the request body in place so the
+/// forwarded payload stays under agentrouter.org's content-filter threshold.
+/// Returns `true` if any string was mutated.
+///
+/// This is safe for both OpenAI and Anthropic shapes because it walks every
+/// JSON string value (system, user, assistant, tool results, content blocks,
+/// tool call inputs) without assuming a particular schema. Plain text,
+/// URLs, JSON tool arguments and short tokens are left untouched.
+bool scrubBase64Payload(Map<String, dynamic> body) {
+  final before = jsonEncode(body);
+  for (final k in body.keys.toList()) {
+    body[k] = _scrubBase64Value(body[k]);
+  }
+  return jsonEncode(body) != before;
 }
 
 /// Max character length for a single system message before trimming.

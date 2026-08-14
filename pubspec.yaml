@@ -1,6 +1,6 @@
 name: agrout_bridge
 description: AgentRouter bridge with TUI dashboard. OpenAI- and Anthropic-compatible local proxy for OpenCode, Claude Desktop, Cursor, etc. Bypasses the upstream client-detection gate with Claude Code header spoofing and WAF cookie management.
-version: 0.1.9
+version: 0.1.11
 
 
 environment:

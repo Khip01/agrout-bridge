@@ -252,14 +252,21 @@ mitigates the most common false positives before forwarding — see
    the legacy strip behind `config.trimSystemPrompt` (default `false`); it
    is not needed because OpenCode's own English `default.txt` system block
    is sufficient to pass.
-2. **Accepted client fingerprint.** Upstream only lets specific
+2. **Base64 blobs are scrubbed before forwarding.** WebFetch (markdown) and
+   file-read tool results embed images as `data:...;base64,...` URIs.
+   Accumulated base64 over ~2,200 chars per request trips the gate with a
+   hard `content-blocked` (see `docs/CONTENT-FILTER.md`). The bridge strips
+   base64 data URIs and bare base64 runs (>= 200 chars) from every JSON
+   string in the body before forwarding (`scrubBase64Payload()`), for both
+   the OpenAI and Anthropic paths.
+3. **Accepted client fingerprint.** Upstream only lets specific
    `User-Agent`s through (see docs/ARCHITECTURE.md). The bridge spoofs
    `opencode/1.0` (OpenAI path) and `claude-cli/2.1.92` (Anthropic path).
-3. **SSE passthrough.** In streaming mode, mid-stream
+4. **SSE passthrough.** In streaming mode, mid-stream
    `content_blocked` / `sensitive_words` / `billing.summary` / `data: null`
    lines are dropped (logged to the activity log) instead of aborting the
    stream, so OpenCode keeps receiving partial responses.
-4. **Port auto-increment (no ratchet).** If `8318` is occupied by a stale
+5. **Port auto-increment (no ratchet).** If `8318` is occupied by a stale
    bridge process, `ServerController.start()` retries the next free port
    (8318 -> 8319 -> 8320, bounded to 25 attempts). The escalated port is
    used only for the current process and is never persisted back into the

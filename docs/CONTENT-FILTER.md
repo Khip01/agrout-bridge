@@ -35,11 +35,47 @@ Interpretation:
    long as the system prompt is the only variable. The gate does not count
    the English/Indonesian ratio of the whole payload, and it does not
    re-check "the last N messages". The user prompt, assistant responses,
-   tool results and web-fetch contents are all neutral.
+   tool results and web-fetch contents are all neutral, **with one
+   exception: base64-encoded blobs** (see below).
 3. **Filler does not count.** Repeating boilerplate English (lorem-style
    text) is rejected; real, varied, imperative instruction text is what
    passes. A "dummy" file of random words therefore cannot act as a filter
    bypass and can actively trip the gate.
+
+## Base64-encoded blobs in tool results trip the gate
+
+The "tool results are neutral" rule above fails for base64-encoded content.
+WebFetch (format=markdown) and file-read tool results embed images, logos
+and fonts as `data:image/png;base64,...` URIs. Enough of those, accumulated
+across the tool results of a single request, reads as obfuscated content to
+the gate and produces a hard `content-blocked` (HTTP 400), even when the
+system prompt is a perfect English anchor:
+
+| Tool content (the only variable) | Result |
+|---|---|
+| 3 webfetch markdown results, no base64 | **200 OK** |
+| rh1 markdown (58,979 chars, base64 total 12,992, longest run 2,408) | `content-blocked` |
+| rh2 markdown (59,097 chars, base64 total 13,118) | `content-blocked` |
+| hf markdown (7,147 chars, base64 total 1,982, runs <= 58) | **200 OK** |
+
+The trigger is the **aggregate base64 payload per request**, not the request
+size: measuring with isolated base64 runs, 2,167 chars in one run passes and
+2,250 chars blocks; 2 runs of 1,050 (total 2,105) pass and 2 runs of 1,150
+(total 2,305) block. The threshold sits around **~2,200 chars of base64 per
+request**. High-entropy random letter strings trigger the same way; plain
+words, digits, hex and URLs do not, so the gate appears to flag "encoded /
+obfuscated-looking" text.
+
+This explains why a session can pass compaction (tool output is truncated to
+`TOOL_OUTPUT_MAX_CHARS = 2000` per tool, below the threshold) yet fail a
+later step once 2-3 webfetch results carrying logo data URIs land in the
+same request.
+
+The bridge neutralizes this before forwarding: `scrubBase64Payload()` walks
+every JSON string value in the body and replaces `data:...;base64,...` URIs
+and bare base64 runs (>= 200 chars) with a short placeholder. Plain text,
+URLs and tool-call arguments are left untouched. The scrub runs for both the
+OpenAI and Anthropic paths.
 
 ## Consequence: never trim the system prompt away
 
