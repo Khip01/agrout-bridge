@@ -22,7 +22,7 @@
   tool results are the one exception that trips the gate. Documented the
   aggregate ~2,200-char base64 threshold, the measured per-request table
   (markdown with data URIs blocks, without them passes) and the bridge
-  scrub behavior. `AGENTS.md` updated to match.
+  scrub behavior. `AGENTS.md` and `docs/ARCHITECTURE.md` updated to match.
 
 ### Internal
 
