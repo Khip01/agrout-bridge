@@ -77,6 +77,38 @@ and bare base64 runs (>= 200 chars) with a short placeholder. Plain text,
 URLs and tool-call arguments are left untouched. The scrub runs for both the
 OpenAI and Anthropic paths.
 
+## Google Docs `kix.` element IDs also trip the gate
+
+The "encoded / obfuscated-looking text" rule has a second, harder hit that
+showed up in a real session (2026-08-14, video-analysis workflow): Google
+Docs element IDs. Whenever the agent discusses document structure it quotes
+real element IDs of the form `kix.kuawx1xiz6sv` (a `kix.` prefix plus a
+random lowercase-alphanumeric suffix, ~13-16 chars total).
+
+Live probing with a ~620k-char reconstruction of the failing request showed
+the gate is cumulative here:
+
+| Added token (only variable, base = 399-entry request) | Result |
+|---|---|
+| `kix.kuawx1xiz6sv` (16 chars) | `content-blocked` |
+| `kix.kuawx1xiz` (13 chars) | `content-blocked` |
+| `kix.kuawx1xi` (12 chars) | **200 OK** |
+| `zzz.kuawx1xiz` / `abc.kuawx1xiz` (other prefix) | **200 OK** |
+| `kix.zzzzzzzzzzzzz` / `kix.abcdefghijklm` (low-entropy suffix) | **200 OK** |
+| `kix.1a2b3c4d5e6f` (regular digit pattern) | **200 OK** |
+
+So the gate flags the `kix.` prefix combined with a high-entropy mixed
+alphanumeric suffix once the request accumulates enough encoded-looking
+content (the same token at base sizes up to ~350 entries passes; at the
+~620k-char boundary it blocks). This is distinct from the base64 trigger:
+it is the *content*, not the byte size, and plain-length or low-entropy
+tokens do not trip it.
+
+The bridge scrubs these before forwarding: `scrubBase64Payload()` also
+replaces `kix.` element IDs (and the bare `kix` + suffix form, no dot) with
+a short placeholder in every JSON string value. Short tokens that do not
+match the pattern are untouched.
+
 ## Consequence: never trim the system prompt away
 
 The bridge's v0.1.6 behavior stripped OpenCode's injected

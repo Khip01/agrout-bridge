@@ -252,13 +252,16 @@ mitigates the most common false positives before forwarding — see
    the legacy strip behind `config.trimSystemPrompt` (default `false`); it
    is not needed because OpenCode's own English `default.txt` system block
    is sufficient to pass.
-2. **Base64 blobs are scrubbed before forwarding.** WebFetch (markdown) and
-   file-read tool results embed images as `data:...;base64,...` URIs.
-   Accumulated base64 over ~2,200 chars per request trips the gate with a
-   hard `content-blocked` (see `docs/CONTENT-FILTER.md`). The bridge strips
-   base64 data URIs and bare base64 runs (>= 200 chars) from every JSON
-   string in the body before forwarding (`scrubBase64Payload()`), for both
-   the OpenAI and Anthropic paths.
+ 2. **Encoded content is scrubbed before forwarding.** WebFetch (markdown)
+    and file-read tool results embed images as `data:...;base64,...` URIs,
+    and document-focused sessions carry Google Docs `kix.` element IDs.
+    Accumulated base64 over ~2,200 chars per request trips the gate with a
+    hard `content-blocked`, and a `kix.` element ID does the same once a
+    large request accumulates enough of that pattern (see
+    `docs/CONTENT-FILTER.md`). The bridge strips base64 data URIs, bare
+    base64 runs (>= 200 chars) and `kix.` element IDs from every JSON
+    string in the body before forwarding (`scrubBase64Payload()`), for both
+    the OpenAI and Anthropic paths.
 3. **Accepted client fingerprint.** Upstream only lets specific
    `User-Agent`s through (see docs/ARCHITECTURE.md). The bridge spoofs
    `opencode/1.0` (OpenAI path) and `claude-cli/2.1.92` (Anthropic path).

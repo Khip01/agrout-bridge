@@ -96,10 +96,12 @@ See `docs/CONTENT-FILTER.md` for the full empirical study. Key facts:
 - agentrouter.org's content gate judges the presence of a coherent English
   instruction block in the **system message**, not the language mix of the
   whole payload. Conversation language, response language and tool output
-  are neutral, except for base64-encoded blobs: accumulated `data:...;base64`
+  are neutral, except for encoded-looking content: accumulated `data:...;base64`
   URIs in tool results over ~2,200 chars per request trip the gate with a
-  hard `content-blocked`. The bridge scrubs base64 from every request-body
-  JSON string before forwarding (`scrubBase64Payload()` in
+  hard `content-blocked`, and Google Docs `kix.` element IDs (e.g.
+  `kix.kuawx1xiz6sv`) do the same once a large request accumulates enough
+  of that pattern. The bridge scrubs both from every request-body JSON
+  string before forwarding (`scrubBase64Payload()` in
   `lib/src/server/proxy.dart`), on both the OpenAI and Anthropic paths.
 - The bridge therefore does **not** strip the system prompt by default.
   The legacy v0.1.6 strip (`trimSystemMessages`, 8000-char cap + tag

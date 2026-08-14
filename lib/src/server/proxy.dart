@@ -378,12 +378,24 @@ final _base64DataUriRegex = RegExp(r'data:[^,]{1,128};base64,[A-Za-z0-9+/=]+');
 /// request far below the measured ~2.2k aggregate trigger.
 final _longBase64RunRegex = RegExp(r'[A-Za-z0-9+/]{200,}={0,2}');
 
+/// Google Docs element IDs, e.g. `kix.kuawx1xiz6sv`. These leak into the
+/// conversation whenever the agent discusses document structure. A single
+/// `kix.` token of ~13 chars reads as encoded/obfuscated content to the
+/// upstream filter and trips `content-blocked` once the request accumulates
+/// enough encoded-looking material (measured: 13-char token blocks at the
+/// ~620k-char boundary, 12-char does not). Replace with a placeholder.
+/// The optional dot also covers the bare form (`kixkuawx1xiz6sv`).
+final _kixElementIdRegex = RegExp(r'kix\.?[a-z0-9]{8,}');
+
+const _kixElementIdPlaceholder = '[kix element id stripped by bridge]';
+
 const _base64Placeholder = '[base64 data stripped by bridge]';
 
 String _scrubBase64String(String input) {
   var out = input;
   out = out.replaceAll(_base64DataUriRegex, _base64Placeholder);
   out = out.replaceAll(_longBase64RunRegex, _base64Placeholder);
+  out = out.replaceAll(_kixElementIdRegex, _kixElementIdPlaceholder);
   return out;
 }
 
@@ -404,8 +416,9 @@ dynamic _scrubBase64Value(dynamic value) {
   return value;
 }
 
-/// Remove base64-encoded content from the request body in place so the
-/// forwarded payload stays under agentrouter.org's content-filter threshold.
+/// Remove encoded content (base64 blobs and Google Docs `kix.` element IDs)
+/// from the request body in place so the forwarded payload stays under
+/// agentrouter.org's content-filter threshold.
 /// Returns `true` if any string was mutated.
 ///
 /// This is safe for both OpenAI and Anthropic shapes because it walks every

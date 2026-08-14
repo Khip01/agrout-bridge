@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.1.12 (2026-08-14)
+
+### Fix
+
+- **Google Docs `kix.` element IDs no longer trip the upstream content
+  filter.** When a session discusses document structure, the agent's text
+  carries real Google Docs element IDs like `kix.kuawx1xiz6sv` (a `kix.`
+  prefix plus a random lowercase-alphanumeric suffix). Live probing showed a
+  single such token of ~13 chars reads as encoded/obfuscated content to
+  agentrouter.org's gate and, once a large request accumulates enough
+  encoded-looking material (~620k-char boundary), produces a hard
+  `content-blocked` (HTTP 400). The bridge now replaces `kix.` element IDs
+  (and the bare `kix` + suffix form) with a short placeholder in every JSON
+  string value before forwarding. Plain text, URLs and short tokens that do
+  not match the pattern are untouched. Runs on both the OpenAI and
+  Anthropic paths.
+
+### Internal
+
+- `test/base64_scrub_test.dart`: added unit tests for `kix.` element ID
+  scrubbing (dot form, bare form, no-op on short tokens).
+- `dart analyze`: 0 issues. Full non-live suite: 76 tests pass.
+
 ## v0.1.11 (2026-08-14)
 
 ### Fix

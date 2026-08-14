@@ -109,5 +109,47 @@ void main() {
       expect(scrubBase64Payload(body), isFalse);
       expect(jsonEncode(body), before);
     });
+
+    test('strips Google Docs kix element IDs', () {
+      final body = {
+        'messages': [
+          {
+            'role': 'assistant',
+            'content': 'lalu gambar `kix.kuawx1xiz6sv` di section landscape',
+          },
+        ],
+      };
+      final changed = scrubBase64Payload(body);
+      expect(changed, isTrue);
+      final content = (body['messages'] as List).first['content'] as String;
+      expect(content, isNot(contains('kix.kuawx1xiz6sv')));
+      expect(content, contains('[kix element id stripped by bridge]'));
+      expect(content, contains('lalu gambar'));
+      expect(content, contains('di section landscape'));
+    });
+
+    test('strips bare kix token without dot', () {
+      final body = {
+        'messages': [
+          {'role': 'assistant', 'content': 'id: kixkuawx1xiz6sv di sini'},
+        ],
+      };
+      final changed = scrubBase64Payload(body);
+      expect(changed, isTrue);
+      final content = (body['messages'] as List).first['content'] as String;
+      expect(content, isNot(contains('kixkuawx1xiz6sv')));
+      expect(content, contains('[kix element id stripped by bridge]'));
+    });
+
+    test('leaves short kix tokens and plain text untouched', () {
+      final body = {
+        'messages': [
+          {'role': 'assistant', 'content': 'kix.abc dan kalimat biasa saja'},
+        ],
+      };
+      final before = jsonEncode(body);
+      expect(scrubBase64Payload(body), isFalse);
+      expect(jsonEncode(body), before);
+    });
   });
 }
