@@ -360,6 +360,7 @@ class ServerController {
           // ignore: avoid_print
           print('[${DateTime.now().toIso8601String()}] $msg');
         },
+        trimSystemPrompt: configStore.config.trimSystemPrompt,
       );
     } finally {
       _activeStreams--;

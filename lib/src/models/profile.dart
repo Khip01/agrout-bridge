@@ -101,11 +101,23 @@ class AppConfig {
   String? activeProfileId;
   String proxyAuthToken;
 
+  /// Strip oversized system-prompt context blocks before forwarding.
+  ///
+  /// Defaults to `false`. Empirical testing against agentrouter.org's input
+  /// content filter (2026-08) shows the filter judges the presence of a
+  /// coherent English instruction block in the system message, not the
+  /// language mix of the whole payload. Trimming the system prompt removes
+  /// that anchor and can cause `content-blocked` rejections, and it does not
+  /// measurably raise the upstream 504 prefill ceiling. Leave it off unless
+  /// a specific deployment needs the old v0.1.6 behavior.
+  bool trimSystemPrompt;
+
   AppConfig({
     this.serverPort = defaultPort,
     this.listenAddress = defaultListenAddress,
     this.activeProfileId,
     this.proxyAuthToken = '',
+    this.trimSystemPrompt = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -113,6 +125,7 @@ class AppConfig {
         'listenAddress': listenAddress,
         if (activeProfileId != null) 'activeProfileId': activeProfileId,
         'proxyAuthToken': proxyAuthToken,
+        'trimSystemPrompt': trimSystemPrompt,
       };
 
   factory AppConfig.fromJson(Map<String, dynamic> json) => AppConfig(
@@ -120,6 +133,7 @@ class AppConfig {
         listenAddress: json['listenAddress'] as String? ?? defaultListenAddress,
         activeProfileId: json['activeProfileId'] as String?,
         proxyAuthToken: json['proxyAuthToken'] as String? ?? '',
+        trimSystemPrompt: json['trimSystemPrompt'] as bool? ?? false,
       );
 }
 

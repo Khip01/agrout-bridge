@@ -244,14 +244,14 @@ with `402 Budget pool quota has been exhausted` or a soft
 mitigates the most common false positives before forwarding — see
 `CHANGELOG.md` v0.1.6 and `docs/ARCHITECTURE.md` (spoof invariants):
 
-1. **System-prompt stripping.** The large OpenCode/Claude Code system
-   message injects repeating context blocks
-   (`<memory_blocks>`, `<available_skills>`, `<memory_instructions>`,
-   `<journal_instructions>`). The bridge strips these tags and hard-caps
-   any single system message at 8000 chars before forwarding, since these
-   are the largest contributors to false-positive content filtering. Only
-   `role: system` is trimmed — all user/assistant content is forwarded
-   verbatim.
+1. **System-prompt stripping is OFF by default.** Live probing of the
+   filter (2026-08, see `docs/CONTENT-FILTER.md`) shows the gate judges the
+   presence of a coherent English instruction block in the system message,
+   not the language mix of the conversation. Trimming the system prompt can
+   drop below that threshold and cause `content-blocked`. The bridge keeps
+   the legacy strip behind `config.trimSystemPrompt` (default `false`); it
+   is not needed because OpenCode's own English `default.txt` system block
+   is sufficient to pass.
 2. **Accepted client fingerprint.** Upstream only lets specific
    `User-Agent`s through (see docs/ARCHITECTURE.md). The bridge spoofs
    `opencode/1.0` (OpenAI path) and `claude-cli/2.1.92` (Anthropic path).
@@ -267,10 +267,14 @@ mitigates the most common false positives before forwarding — see
    stale listener is cleaned up. `/info` reports the actual bound port as
    `serverPort` and the configured default as `configuredPort`.
 
-If you still hit a hard `content-blocked`, it is an upstream policy
-decision, not a bridge bug — request a budget-policy/quota adjustment on
-your AgentRouter account or route Claude traffic directly via a non-
-AgentRouter provider.
+The 504 ceiling on very large requests is a **prefill-time limit of the
+upstream gateway** (stable ~123s timeout), not a filter rejection and not
+a bridge bug. The client should declare a context/input limit below the
+measured ceiling so it auto-compacts before the 504 (see
+`docs/CONTENT-FILTER.md` for measured values per model). If you still hit
+a hard `content-blocked`, it is an upstream policy decision, not a bridge
+bug — request a budget-policy/quota adjustment on your AgentRouter account
+or route Claude traffic directly via a non-AgentRouter provider.
 
 ## Port
 

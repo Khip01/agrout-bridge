@@ -58,6 +58,7 @@ Future<void> proxyRequest({
   void Function(List<String> freshCookiePairs)? onWafCaptured,
   void Function(String line)? onLog,
   Duration idleTimeout = const Duration(seconds: 120),
+  bool trimSystemPrompt = false,
 }) async {
   final startedAt = DateTime.now();
   bool streaming = false;
@@ -105,7 +106,15 @@ Future<void> proxyRequest({
           // large system prompt with memory/skills/journal blocks) to avoid
           // tripping agentrouter.org's input content filter / quota. Mirrors
           // the approach used by Lyravein's agentrouter-bridge.
-          trimSystemMessages(body);
+          //
+          // Disabled by default: the trim removes the English instruction
+          // anchor the content filter actually judges, and empirical testing
+          // shows it neither reduces content-blocked nor raises the upstream
+          // 504 prefill ceiling. Enable only via config.trimSystemPrompt for
+          // legacy behavior.
+          if (trimSystemPrompt) {
+            trimSystemMessages(body);
+          }
           // Normalize OpenAI-native reasoning params into the Anthropic-native
           // `thinking` block for Claude-family models.
           //

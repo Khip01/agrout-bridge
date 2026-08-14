@@ -27,15 +27,17 @@ void main() {
       expect(cfg.listenAddress, '127.0.0.1');
       expect(cfg.activeProfileId, isNull);
       expect(cfg.proxyAuthToken, '');
+      expect(cfg.trimSystemPrompt, isFalse);
     });
 
     test('roundtrip via toJson / fromJson', () {
-      final cfg = AppConfig(serverPort: 9100, listenAddress: '0.0.0.0', activeProfileId: 'a', proxyAuthToken: 'secret');
+      final cfg = AppConfig(serverPort: 9100, listenAddress: '0.0.0.0', activeProfileId: 'a', proxyAuthToken: 'secret', trimSystemPrompt: true);
       final restored = AppConfig.fromJson(cfg.toJson());
       expect(restored.serverPort, 9100);
       expect(restored.listenAddress, '0.0.0.0');
       expect(restored.activeProfileId, 'a');
       expect(restored.proxyAuthToken, 'secret');
+      expect(restored.trimSystemPrompt, isTrue);
     });
 
     test('ConfigStore.save + load roundtrip persists to 0600 on unix', () {

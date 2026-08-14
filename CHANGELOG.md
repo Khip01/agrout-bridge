@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.1.10 (2026-08-14)
+
+### Fix
+
+- **System-prompt trimming is off by default.** The v0.1.6 behavior
+  (`trimSystemMessages`) stripped OpenCode's `<memory_blocks>` /
+  `<available_skills>` / `<memory_instructions>` / `<journal_instructions>`
+  tags and hard-capped the system message at 8000 chars. Live probing of
+  agentrouter.org's content filter (2026-08) shows the gate judges the
+  presence of a coherent English instruction block in the system message,
+  not the language mix of the payload; trimming can drop below that
+  threshold and cause `content-blocked`. The strip still exists behind the
+  new `config.trimSystemPrompt` flag, default `false`.
+
+### Docs
+
+- **New `docs/CONTENT-FILTER.md`** documents the empirical filter study:
+  the gate measures the system message, not the conversation; filler text
+  is rejected; the upstream `HTTP 504` on very large requests is a
+  prefill-time gateway limit (stable ~123s), not a filter rejection; and
+  recommended per-model context/input limits so clients auto-compact
+  before the 504. `AGENTS.md` and `docs/ARCHITECTURE.md` updated to match.
+
+### Internal
+
+- `test/profile_test.dart` now covers the `trimSystemPrompt` config field
+  roundtrip and default.
+- `dart analyze`: 0 issues. Full non-live suite: 67 tests pass.
+
 ## v0.1.9 (2026-08-13)
 
 ### Fixes

@@ -89,6 +89,25 @@ The proxy never translates between protocols — AgentRouter speaks both
 Anthropic Messages and OpenAI Chat Completions natively, so each route
 is a straight pass-through with the spoof + WAF layer in front.
 
+### Content filter and 504 ceiling
+
+See `docs/CONTENT-FILTER.md` for the full empirical study. Key facts:
+
+- agentrouter.org's content gate judges the presence of a coherent English
+  instruction block in the **system message**, not the language mix of the
+  whole payload. Conversation language, response language and tool output
+  are neutral.
+- The bridge therefore does **not** strip the system prompt by default.
+  The legacy v0.1.6 strip (`trimSystemMessages`, 8000-char cap + tag
+  removal) is gated behind `config.trimSystemPrompt`, default `false`,
+  because trimming can drop the system prompt below the filter threshold
+  and cause `content-blocked`.
+- Very large single requests die on an upstream **HTTP 504** (gateway
+  prefill-timeout at a stable ~123s), not a filter rejection. The client
+  should declare a context/input limit below the measured ceiling per
+  model so auto-compaction happens first (recommended values in
+  `docs/CONTENT-FILTER.md`).
+
 ## WAF cookie jar
 
 The upstream edge (`acw_tc`, `acw_sc__v2`, `acw_sc__v3`, `cdn_sec_tc`)
