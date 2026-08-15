@@ -103,6 +103,9 @@ See `docs/CONTENT-FILTER.md` for the full empirical study. Key facts:
   of that pattern. The bridge scrubs both from every request-body JSON
   string before forwarding (`scrubBase64Payload()` in
   `lib/src/server/proxy.dart`), on both the OpenAI and Anthropic paths.
+  Multimodal image content blocks (OpenAI `image_url`, Anthropic `image`)
+  are preserved untouched so real uploaded reference images reach the
+  model; scrubbing those broke upstream base64 decoding.
 - The bridge therefore does **not** strip the system prompt by default.
   The legacy v0.1.6 strip (`trimSystemMessages`, 8000-char cap + tag
   removal) is gated behind `config.trimSystemPrompt`, default `false`,

@@ -7,6 +7,79 @@ String _b64Run(int chars) => 'A' * chars;
 
 void main() {
   group('scrubBase64Payload', () {
+    test('preserves OpenAI image_url content blocks (real uploaded images)', () {
+      final b64 = _b64Run(400);
+      final body = {
+        'messages': [
+          {
+            'role': 'user',
+            'content': [
+              {
+                'type': 'image_url',
+                'image_url': {'url': 'data:image/png;base64,$b64'},
+              },
+              {'type': 'text', 'text': 'Gunakan gambar ini sebagai referensi.'},
+            ],
+          },
+        ],
+      };
+      final before = jsonEncode(body);
+      final changed = scrubBase64Payload(body);
+      expect(changed, isFalse);
+      expect(jsonEncode(body), before);
+    });
+
+    test('preserves Anthropic image content blocks (source base64 data)', () {
+      final b64 = _b64Run(400);
+      final body = {
+        'messages': [
+          {
+            'role': 'user',
+            'content': [
+              {
+                'type': 'image',
+                'source': {
+                  'type': 'base64',
+                  'media_type': 'image/png',
+                  'data': b64,
+                },
+              },
+              {'type': 'text', 'text': 'referensi scene 1'},
+            ],
+          },
+        ],
+      };
+      final before = jsonEncode(body);
+      final changed = scrubBase64Payload(body);
+      expect(changed, isFalse);
+      expect(jsonEncode(body), before);
+    });
+
+    test('still scrubs base64 hidden in text around image blocks', () {
+      final body = {
+        'messages': [
+          {
+            'role': 'user',
+            'content': [
+              {
+                'type': 'image_url',
+                'image_url': {'url': 'data:image/png;base64,${_b64Run(300)}'},
+              },
+              {'type': 'text', 'text': 'data:image/png;base64,${_b64Run(2500)}'},
+            ],
+          },
+        ],
+      };
+      final changed = scrubBase64Payload(body);
+      expect(changed, isTrue);
+      final blocks = (body['messages'] as List).first['content'] as List;
+      final imageUrl =
+          (blocks[0]['image_url'] as Map)['url'] as String;
+      expect(imageUrl, contains('data:image/png;base64,'));
+      expect(imageUrl, isNot(contains('[base64 data stripped by bridge]')));
+      expect(blocks[1]['text'], contains('[base64 data stripped by bridge]'));
+    });
+
     test('strips base64 data URIs from tool results', () {
       final body = {
         'messages': [

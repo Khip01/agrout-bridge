@@ -261,7 +261,9 @@ mitigates the most common false positives before forwarding — see
     `docs/CONTENT-FILTER.md`). The bridge strips base64 data URIs, bare
     base64 runs (>= 200 chars) and `kix.` element IDs from every JSON
     string in the body before forwarding (`scrubBase64Payload()`), for both
-    the OpenAI and Anthropic paths.
+    the OpenAI and Anthropic paths. Multimodal image content blocks (OpenAI
+    `image_url`, Anthropic `image`) are preserved untouched so real uploaded
+    reference images reach the model.
 3. **Accepted client fingerprint.** Upstream only lets specific
    `User-Agent`s through (see docs/ARCHITECTURE.md). The bridge spoofs
    `opencode/1.0` (OpenAI path) and `claude-cli/2.1.92` (Anthropic path).

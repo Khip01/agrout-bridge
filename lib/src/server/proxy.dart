@@ -399,6 +399,17 @@ String _scrubBase64String(String input) {
   return out;
 }
 
+/// True when [value] is a multimodal image content block that must reach the
+/// model intact (OpenAI `image_url` part, Anthropic `image` part). These carry
+/// real uploaded reference images; scrubbing their data URI breaks upstream
+/// base64 decoding with `illegal base64 data at input byte 0`. Base64 hidden
+/// inside plain text and tool results is still scrubbed.
+bool _isImageContentBlock(Map value) {
+  if (value['type'] == 'image_url') return true;
+  if (value['type'] == 'image' && value['source'] is Map) return true;
+  return false;
+}
+
 dynamic _scrubBase64Value(dynamic value) {
   if (value is String) return _scrubBase64String(value);
   if (value is List) {
@@ -408,6 +419,7 @@ dynamic _scrubBase64Value(dynamic value) {
     return value;
   }
   if (value is Map) {
+    if (_isImageContentBlock(value)) return value;
     for (final k in value.keys.toList()) {
       value[k] = _scrubBase64Value(value[k]);
     }
@@ -425,6 +437,8 @@ dynamic _scrubBase64Value(dynamic value) {
 /// JSON string value (system, user, assistant, tool results, content blocks,
 /// tool call inputs) without assuming a particular schema. Plain text,
 /// URLs, JSON tool arguments and short tokens are left untouched.
+/// Multimodal image content blocks (OpenAI `image_url`, Anthropic `image`)
+/// are preserved untouched so real uploaded reference images reach the model.
 bool scrubBase64Payload(Map<String, dynamic> body) {
   final before = jsonEncode(body);
   for (final k in body.keys.toList()) {

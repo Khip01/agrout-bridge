@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.1.13 (2026-08-15)
+
+### Fix
+
+- **Real uploaded reference images are no longer destroyed by the base64
+  scrub.** v0.1.11's scrub stripped every base64 data URI it could find,
+  including the data URI inside OpenAI `image_url` content blocks and
+  Anthropic `image` source blocks. When a user attached a real image (for
+  example a first frame for image-to-video generation), the bridge replaced
+  its data URI with the placeholder text `[base64 data stripped by bridge]`,
+  which the upstream model then tried to base64-decode and failed with
+  `illegal base64 data at input byte 0`, exhausting retries and opening the
+  circuit breaker. The scrub now detects and preserves multimodal image
+  content blocks (OpenAI `image_url` part, Anthropic `image` part with a
+  `source` map) untouched, so real images reach the model intact. Base64
+  hidden inside plain text, tool results and WebFetch markdown is still
+  scrubbed as before.
+
+### Internal
+
+- `test/base64_scrub_test.dart`: added unit tests for image content block
+  preservation (OpenAI `image_url`, Anthropic `image`, scrub-still-applies
+  to text around image blocks).
+- `dart analyze`: 0 issues. Full non-live suite: 78 tests pass.
+
 ## v0.1.12 (2026-08-14)
 
 ### Fix

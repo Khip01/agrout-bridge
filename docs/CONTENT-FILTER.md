@@ -77,6 +77,14 @@ and bare base64 runs (>= 200 chars) with a short placeholder. Plain text,
 URLs and tool-call arguments are left untouched. The scrub runs for both the
 OpenAI and Anthropic paths.
 
+**Image content blocks are preserved.** Since v0.1.13 the scrub detects
+multimodal image parts (OpenAI `image_url` content block, Anthropic `image`
+content block with a `source` map) and leaves their data URI / base64 data
+untouched. These carry real uploaded reference images the model must see
+(for example a first frame for image-to-video generation); replacing them
+made upstream fail with `illegal base64 data at input byte 0`. Base64
+hidden in text, tool results and WebFetch markdown is still scrubbed.
+
 ## Google Docs `kix.` element IDs also trip the gate
 
 The "encoded / obfuscated-looking text" rule has a second, harder hit that
