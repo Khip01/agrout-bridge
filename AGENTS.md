@@ -338,5 +338,11 @@ When making changes to this project, the AI agent must:
 1. Sync `CHANGELOG.md` for every functional change before commit.
 2. Keep `AGENTS.md` in sync with the actual project state (file structure,
    CLI contract, distribution flow).
-3. Never commit API keys, session tokens, or any `~/.config/agrout-bridge/`
+3. **Sync `package.json` `version` with the new release tag.** Before creating
+   a stable tag, update `package.json` to match `vX.Y.Z` (no leading `v`).
+   The release workflow reads this field to name the npm tarball
+   (`agrout-bridge-vX.Y.Z.tgz`) and to validate the `--version` intercept in
+   `bin/agrout-bridge.js`. A mismatched version produces a tarball that does
+   not match its tag — do not skip this.
+4. Never commit API keys, session tokens, or any `~/.config/agrout-bridge/`
    artifact. `.gitignore` must cover them.

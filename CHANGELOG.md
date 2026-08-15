@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.1.14 (2026-08-16)
 
 ### Fix
 
@@ -25,7 +25,7 @@
   ("Refreshing…" / "Idle" / "Xs ago"), mirroring the commandcode-bridge status
   bar layout so the user can see at a glance whether the proxy is serving
   requests.
-- **Footer highlights active streams.** When `activeStreams > 0` the footer
+  - **Footer highlights active streams.** When `activeStreams > 0` the footer
   appends `(streams:N)` in yellow, giving real-time visibility into in-flight
   requests without switching to the Proxy page.
 
