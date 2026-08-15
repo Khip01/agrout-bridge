@@ -44,6 +44,8 @@ class AppState extends State<AgroutApp> {
   int _selectedModelIndex = 0;
   bool _loadingModels = false;
 
+  DateTime? _lastRefreshAt;
+
   Map<String, dynamic>? _billing;
   bool _loadingBilling = false;
 
@@ -60,6 +62,7 @@ class AppState extends State<AgroutApp> {
   final _logScrollCtrl = ScrollController();
   int _lastLogVersion = -1;
   int _lastModelVersion = -1;
+  int _lastUsageVersion = 0; // UsageStore.version advances on every record()
 
   static const _pageNames = ['Profile', 'Usage & Cost', 'Models', 'Proxy Config'];
 
@@ -84,21 +87,33 @@ class AppState extends State<AgroutApp> {
   }
 
   void _startPageRefresh() {
+    // Refresh every second (not 500ms). The 500ms tick combined with
+    // unconditional setState during live log streaming produced a terminal
+    // redraw race that garbled the TUI. Mirror the commandcode-bridge model:
+    // only setState when something actually changed (version-dirty checks).
     _pageRefreshTimer?.cancel();
-    _pageRefreshTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (!mounted) return;
-      if (_panel == _Panel.main && _showLog && _lastLogVersion != LogStore.version) {
+    _pageRefreshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _panel != _Panel.main) return;
+
+      if (_showLog && _lastLogVersion != LogStore.version) {
         _lastLogVersion = LogStore.version;
         setState(() {});
         return;
       }
+
       if (_lastModelVersion != _proxy.modelCacheVersion) {
         _lastModelVersion = _proxy.modelCacheVersion;
         setState(() {});
         return;
       }
-      if (_infoPage == _InfoPage.proxy || _infoPage == _InfoPage.usage) {
+
+      // Usage page reads a live singleton; only repaint if a new request
+      // was recorded (version advances on every record()).
+      final usageVersion = UsageStore().version;
+      if (_infoPage == _InfoPage.usage && _lastUsageVersion != usageVersion) {
+        _lastUsageVersion = usageVersion;
         setState(() {});
+        return;
       }
     });
   }
@@ -254,12 +269,15 @@ class AppState extends State<AgroutApp> {
     if (_loadingModels) return;
     _loadingModels = true;
     _setStatus('Refreshing model list from agentrouter.org...');
+    _lastRefreshAt = DateTime.now();
     try {
       final n = await _proxy.refreshModels();
       _lastModelVersion = _proxy.modelCacheVersion;
       _setStatus('Data refreshed: $n model(s)', duration: 3);
     } finally {
       _loadingModels = false;
+      _lastRefreshAt = DateTime.now();
+      if (mounted) setState(() {});
     }
     unawaited(_refreshBilling());
   }
@@ -536,22 +554,45 @@ class AppState extends State<AgroutApp> {
 
   // ── Status bar ────────────────────────────────────────────────────
   Component _buildStatusBar() {
+    final s = _proxy.status();
+    final uptime = DateTime.now().difference(s.startedAt);
+    final h = uptime.inHours;
+    final m = uptime.inMinutes.remainder(60);
+    final sec = uptime.inSeconds.remainder(60);
+    final upStr = '${h}h ${m}m ${sec}s';
+    final streams = s.activeStreams;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 1),
       child: Row(children: [
-        Text(' ${_status.isEmpty ? "Idle" : _status}', style: TextStyle(color: _status.isEmpty ? Colors.grey : _notifColor())),
+        Text(' ${_status.isEmpty ? "Idle" : _status}',
+            style: TextStyle(color: _status.isEmpty ? Colors.grey : _notifColor())),
+        const Spacer(),
+        if (streams > 0)
+          Text(' streams:$streams', style: const TextStyle(color: Colors.yellow)),
+        Text('  uptime: $upStr', style: const TextStyle(color: Colors.grey)),
+        Text('  ${_refreshLabel()}', style: const TextStyle(color: Colors.grey)),
       ]),
     );
   }
 
+  String _refreshLabel() {
+    final secs = DateTime.now().difference(_proxy.status().startedAt).inSeconds;
+    final last = _lastRefreshAt == null ? 'Idle' : '${secs}s ago';
+    if (_loadingModels) return 'Refreshing…';
+    return last;
+  }
+
   // ── Footer ────────────────────────────────────────────────────────
   Component _buildFooter() {
+    final s = _proxy.status();
+    final hasStreams = s.activeStreams > 0;
     final hint = _panel == _Panel.main
-        ? '[1-4] page | [r] refresh | [o]/[a] copy endpoint | [p] port | [l] login | [h] help | [q] quit | [Ctrl+L] log'
+        ? '[1-4] page | [r] refresh | [o]/[a] copy endpoint | [p] port | [l] login | [h] help | [q] quit | [Ctrl+L] log${hasStreams ? "  (streams:${s.activeStreams})" : ""}'
         : (_panel == _Panel.login ? '[c] copy URL | [Esc] close' : '[Esc] back');
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 1),
-      child: Text(' $hint', style: TextStyle(color: Colors.grey)),
+      child: Text(' $hint',
+          style: TextStyle(color: hasStreams ? Colors.yellow : Colors.grey)),
     );
   }
 

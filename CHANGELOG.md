@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Fix
+
+- **Terminal redraw race that garbled the TUI fixed.** The TUI refresh timer
+  fired every 500ms and called `setState` unconditionally on the Proxy and
+  Usage pages, which re-rendered the 200-entry log panel while live log lines
+  were streaming from the proxy. The interleaved repaint produced the garbled
+  output observed in the bridge (log lines, header, footer and proxy status
+  lines overlaid on top of each other). The refresh interval is now 1 second
+  and `setState` is only invoked when data actually changed, mirroring the
+  proven model in `commandcode-bridge`: the timer compares `LogStore.version`,
+  `ServerController.modelCacheVersion` and the new `UsageStore.version`
+  counter and returns early otherwise.
+- **`UsageStore` now exposes a monotonic `version` integer** that advances on
+  every recorded request, so the TUI can dirty-check the Usage page without
+  reading the mutable singleton fields on every tick.
+
+### Improve
+
+- **Status bar now shows streaming context.** The status bar (below the page
+  content) displays uptime, active stream count, and a refresh indicator
+  ("Refreshing…" / "Idle" / "Xs ago"), mirroring the commandcode-bridge status
+  bar layout so the user can see at a glance whether the proxy is serving
+  requests.
+- **Footer highlights active streams.** When `activeStreams > 0` the footer
+  appends `(streams:N)` in yellow, giving real-time visibility into in-flight
+  requests without switching to the Proxy page.
+
 ## v0.1.13 (2026-08-15)
 
 ### Fix

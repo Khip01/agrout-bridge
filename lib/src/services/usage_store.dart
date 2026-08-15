@@ -18,8 +18,10 @@ class UsageStore {
   String? _lastModel;
   DateTime? _lastRequestAt;
   final Map<String, _ModelStats> _byModel = {};
+  int _version = 0;
 
   int get totalRequests => _totalRequests;
+  int get version => _version;
   int get successRequests => _successRequests;
   int get streamRequests => _streamRequests;
   int get inputTokens => _inputTokens;
@@ -54,6 +56,7 @@ class UsageStore {
       m.outputTokens += o.outputTokens;
       m.costCny += o.costCny;
     }
+    _version++;
   }
 
   void reset() {
@@ -68,6 +71,7 @@ class UsageStore {
     _lastModel = null;
     _lastRequestAt = null;
     _byModel.clear();
+    _version++;
   }
 }
 
