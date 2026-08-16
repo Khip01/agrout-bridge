@@ -6,27 +6,30 @@
 
 - **TUI update now closes only the TUI, then tells the user to run
   `agrout-bridge update`.**
-  - The previous design spawned the update as a detached child and called
-    `shutdownApp(0)`, which maps to `exit(0)` in nocterm: the whole process
-    died, the child was unreliable, and earlier a plain `await
-    _proxy.stop()` present in the first version froze the TUI while an SSE
-    stream was active.
-  - Now `[Shift+U]` confirm uses `TerminalBinding.instance.shutdown()`
-    (restores the terminal without exiting), `main.dart` prints
-    `agrout-bridge update` and exits normally, and the standalone update
-    command replaces the binary from a stable process. The TUI no longer
-    attempts an in-process update.
+  - The earlier attempts were broken twice. The first version did a plain
+    `await _proxy.stop()`, which blocks while an SSE stream is active, so
+    the TUI froze. The second version called `shutdownApp(0)`, which maps to
+    `exit(0)` in nocterm, killing the whole process and relying on an
+    unreliable detached child.
+  - Now `[Shift+U]` confirm calls `_proxy.stop()` with a 2s timeout (can
+    never hang), cancels every app timer (page refresh / status / login
+    expiry) so no stray frame repaints the restored main buffer, invokes
+    `AgroutApp.onUpdateRequested(tag)`, then uses
+    `TerminalBinding.instance.shutdown()`, which restores the terminal
+    WITHOUT exiting the process. `runApp()` returns in `main.dart`, which
+    prints a clear instruction and exits normally:
+    `agrout-bridge update`. The TUI no longer attempts an in-process update.
+- **Update notice now only prints for headless mode.** The startup notice
+  previously ran `await fetchLatestTag()` in plain mode too, which added a
+  network round-trip before the TUI opened (perceived as a delay) and
+  printed "Update available" above the TUI. TUI mode relies on its own
+  non-blocking `_checkForUpdate()` badge; only `--server` prints the notice
+  before its "running headless" banner.
 - **In-TUI update no longer freezes or prints a doubled version.**
   - The confirm dialog and update notice showed `-> vv0.1.21`: `_updateTag`
     already carries the leading `v` (it is the GitHub tag), so the extra `v`
     prefix was dropped everywhere (`Update Available!`, the confirm dialog,
     the `[Shift+U]` help entry and the headless startup notice).
-  - Pressing `[y]` previously hung the TUI: `_doUpdate()` awaited
-    `_proxy.stop()`, which can block while an SSE stream is active, so
-    `shutdownApp(0)` never ran and the screen stayed frozen with stray
-    `updating...` text. The update path now spawns the detached
-    `agrout-bridge update` child and shuts the TUI down immediately without
-    awaiting the stop; the OS reaps the listener on exit.
 - **Port configuration now gives feedback and requires a test before save.**
   Previously pressing Enter in the dialog did nothing (the focused TextField
   consumed Enter, and the scan result was only shown, never actionable). The

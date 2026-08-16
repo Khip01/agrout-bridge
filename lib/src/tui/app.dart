@@ -1328,8 +1328,24 @@ class AppState extends State<AgroutApp> {
   /// returns in `main.dart`, where the update instructions are printed and
   /// the process exits normally. `_proxy.stop()` is bounded by a timeout so
   /// an active SSE stream can never freeze the shutdown.
+  /// Confirm the update: notify the host via [AgroutApp.onUpdateRequested] and
+  /// close only the TUI (not the process) using [TerminalBinding.shutdown],
+  /// which restores the terminal without calling `exit()`. `runApp()` then
+  /// returns in `main.dart`, where the update instructions are printed and
+  /// the process exits normally.
+  ///
+  /// [TerminalBinding.shutdown] leaves the alternate screen and clears it.
+  /// Any reactive timer still scheduled (the 1s refresh, the sign-in expiry)
+  /// would fire during the brief window before the event loop stops and repaint
+  /// the TUI directly onto the restored main buffer, leaving stray status-bar
+  /// text and a big blank gap. We cancel every app timer first so that cannot
+  /// happen. `_proxy.stop()` is also bounded so an active SSE stream can never
+  /// freeze the shutdown.
   Future<void> _doUpdate() async {
     final tag = _updateTag;
+    _pageRefreshTimer?.cancel();
+    _statusTimer?.cancel();
+    _loginExpiry?.cancel();
     try {
       await _proxy.stop().timeout(const Duration(seconds: 2));
     } catch (_) {
@@ -1352,9 +1368,9 @@ class AppState extends State<AgroutApp> {
         const SizedBox(height: 1),
         Text('agrout-bridge v$bridgeVersion -> $_updateTag'),
         const SizedBox(height: 1),
-        const Text('The TUI will be closed.'),
+        const Text('The TUI will close, then you run:'),
         const SizedBox(height: 1),
-        const Text('After exiting, run:  agrout-bridge update'),
+        const Text('  agrout-bridge update'),
         const SizedBox(height: 1),
         const Text('[y] Yes  [n] No'),
       ]),

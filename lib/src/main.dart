@@ -112,15 +112,16 @@ Future<void> _runCommand(List<String> args) async {
   // mode records requests too. TUI mode re-inits in `AppState.initState`,
   // which is idempotent (reloads the same file).
   LogStore.init();
-  // Check for an update before the bridge starts (best-effort, 1h
-  // cache). Print the notice in both headless and TUI modes so the operator
-  // sees it before the proxy UI takes over the screen.
-  await _printUpdateNoticeIfAny();
   final controller = ServerController(profiles: profiles, configStore: config);
   final boundPort = await controller.start();
   await controller.refreshModels();
 
   if (isServer) {
+    // Headless: print the update notice (best-effort, 1h cache) before the
+    // "running headless" banner. TUI mode does NOT call this: it would add a
+    // network round-trip to startup, and the TUI already surfaces an
+    // "Update Available!" badge via its own non-blocking check.
+    await _printUpdateNoticeIfAny();
     LogStore.info('agrout-bridge headless started on '
         '${config.config.listenAddress}:$boundPort');
     stdout.writeln('agrout-bridge running headless on http://${config.config.listenAddress}:$boundPort');
@@ -161,9 +162,13 @@ Future<void> _runCommand(List<String> args) async {
   // restored. Print the update instruction, then exit normally.
   if (requestedUpdateTag != null) {
     stdout.writeln();
-    stdout.writeln('agrout-bridge v$bridgeVersion -> $requestedUpdateTag');
-    stdout.writeln('Update the bridge with:');
+    stdout.writeln('Update available: v$bridgeVersion -> $requestedUpdateTag');
+    stdout.writeln('To install the update, run this command:');
+    stdout.writeln();
     stdout.writeln('  agrout-bridge update');
+    stdout.writeln();
+    stdout.writeln('After it finishes, start the bridge again with:');
+    stdout.writeln('  agrout-bridge run');
     stdout.writeln();
     stdout.flush();
   }
