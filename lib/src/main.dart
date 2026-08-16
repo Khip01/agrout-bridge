@@ -266,12 +266,12 @@ Future<void> _profileLogin(ProfileStore profiles, ConfigStore config) async {
   final url = await flow.start(onResult: (outcome) async {
     if (outcome.success) {
       applyLoginOutcome(profile, outcome, profiles);
-      stdout.writeln('Login berhasil${outcome.username != null ? ' sebagai ${outcome.username}' : ''}.');
+      stdout.writeln('Login successful${outcome.username != null ? ' as ${outcome.username}' : ''}.');
     } else {
-      stderr.writeln('Login gagal: ${outcome.message ?? 'unknown error'}');
+      stderr.writeln('Login failed: ${outcome.message ?? 'unknown error'}');
     }
   });
-  stdout.writeln('Open this URL in your browser to sign in:');
+  stdout.writeln('Open this sign-in URL in a new browser tab to authenticate:');
   stdout.writeln('  $url');
   stdout.writeln('The server will auto-close after 10 minutes.');
   // Wait for SIGINT so the user can press Ctrl+C to release the URL.

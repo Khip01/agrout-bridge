@@ -44,8 +44,6 @@ class AppState extends State<AgroutApp> {
   int _selectedModelIndex = 0;
   bool _loadingModels = false;
 
-  DateTime? _lastRefreshAt;
-
   Map<String, dynamic>? _billing;
   bool _loadingBilling = false;
 
@@ -63,6 +61,7 @@ class AppState extends State<AgroutApp> {
   int _lastLogVersion = -1;
   int _lastModelVersion = -1;
   int _lastUsageVersion = 0; // UsageStore.version advances on every record()
+  DateTime? _lastRefreshAt; // last foreground refresh timestamp
 
   static const _pageNames = ['Profile', 'Usage & Cost', 'Models', 'Proxy Config'];
 
@@ -87,36 +86,42 @@ class AppState extends State<AgroutApp> {
   }
 
   void _startPageRefresh() {
-    // Refresh every second (not 500ms). The 500ms tick combined with
-    // unconditional setState during live log streaming produced a terminal
-    // redraw race that garbled the TUI. Mirror the commandcode-bridge model:
-    // only setState when something actually changed (version-dirty checks).
+    // Refresh every second. Header (uptime + profile) and footer (stream
+    // count) update in real-time; page body content uses dirty checks to
+    // avoid unnecessary re-render when nothing changed. This mirrors the
+    // commandcode-bridge refresh model (1s tick, version-gated body).
     _pageRefreshTimer?.cancel();
     _pageRefreshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || _panel != _Panel.main) return;
 
+      bool contentChanged = false;
       if (_showLog && _lastLogVersion != LogStore.version) {
         _lastLogVersion = LogStore.version;
-        setState(() {});
-        return;
+        contentChanged = true;
       }
-
       if (_lastModelVersion != _proxy.modelCacheVersion) {
         _lastModelVersion = _proxy.modelCacheVersion;
-        setState(() {});
-        return;
+        contentChanged = true;
       }
-
-      // Usage page reads a live singleton; only repaint if a new request
-      // was recorded (version advances on every record()).
       final usageVersion = UsageStore().version;
       if (_infoPage == _InfoPage.usage && _lastUsageVersion != usageVersion) {
         _lastUsageVersion = usageVersion;
+        contentChanged = true;
+      }
+
+      // Uptime lives in the header which re-renders on every setState, so we
+      // always call setState to tick the clock. The body ListView is rebuilt
+      // but nocterm batches the render, matching commandcode-bridge's clean
+      // header/uptime update pattern.
+      if (contentChanged || _lastStatusTick != _tickSeconds()) {
+        _lastStatusTick = _tickSeconds();
         setState(() {});
-        return;
       }
     });
   }
+
+  int _lastStatusTick = 0;
+  int _tickSeconds() => DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
   void _setStatus(String msg, {int? duration}) {
     _statusTimer?.cancel();
@@ -818,13 +823,13 @@ class AppState extends State<AgroutApp> {
       final url = await flow.start(onResult: (outcome) async {
         if (outcome.success) {
           applyLoginOutcome(profile, outcome, _profiles);
-          _loginMessage = 'Login berhasil${outcome.username != null ? " sebagai ${outcome.username}" : ""}';
+          _loginMessage = 'Login successful${outcome.username != null ? " as ${outcome.username}" : ""}';
           _setStatus(_loginMessage!, duration: 4);
           LogStore.success(_loginMessage!);
           _loginBusy = false;
           if (mounted) setState(() {});
         } else {
-          _loginMessage = 'Login gagal: ${outcome.message ?? 'unknown'}';
+          _loginMessage = 'Login failed: ${outcome.message ?? 'unknown'}';
           _setStatus(_loginMessage!, duration: 4);
           LogStore.warning(_loginMessage!);
           _loginBusy = false;
@@ -832,7 +837,7 @@ class AppState extends State<AgroutApp> {
         }
       });
       _loginUrl = url;
-      _loginMessage = 'Open URL in browser, then return here.';
+      _loginMessage = 'Open the sign-in URL in your browser, authenticate, then paste your API key in the field below.';
       _loginBusy = false;
       _loginExpiry?.cancel();
       _loginExpiry = Timer(const Duration(minutes: 10), _closeLoginPanel);

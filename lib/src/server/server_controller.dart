@@ -21,6 +21,7 @@ import 'dart:io';
 import '../models/profile.dart';
 import '../models/version.dart';
 import '../services/api_client.dart';
+import '../services/log_store.dart';
 import '../services/usage_store.dart';
 import '../services/waf.dart';
 import 'circuit.dart';
@@ -179,6 +180,22 @@ class ServerController {
     profiles.upsert(updated);
   }
 
+  static String _fmtNow() => DateTime.now().toIso8601String();
+
+  // Log a request line: [ts] PATH METHOD (bytes) or [ts] PATH METHOD (stream)
+  void _logRequest(String path, String method, {int bytes = 0, bool stream = false}) {
+    final size = stream ? 'stream' : '$bytes bytes';
+    LogStore.info('[${_fmtNow()}] $method $path ($size)');
+  }
+
+  static int _contentLength(HttpResponse resp) {
+    try {
+      return resp.contentLength;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   Future<void> _handle(HttpRequest req) async {
     final path = req.uri.path;
     final method = req.method;
@@ -186,18 +203,22 @@ class ServerController {
     // Open endpoints
     if (method == 'GET' && (path == '/health' || path == '/api/health')) {
       _respondHealth(req);
+      _logRequest(path, method, bytes: _contentLength(req.response));
       return;
     }
     if (method == 'GET' && (path == '/v1/models' || path == '/models')) {
       await _respondModels(req);
+      _logRequest(path, method, bytes: _contentLength(req.response));
       return;
     }
     if (method == 'GET' && path == '/info') {
       _respondInfo(req);
+      _logRequest(path, method, bytes: _contentLength(req.response));
       return;
     }
     if (method == 'GET' && path == '/v1/token') {
       _respondToken(req);
+      _logRequest(path, method, bytes: _contentLength(req.response));
       return;
     }
 
@@ -206,11 +227,11 @@ class ServerController {
     // top-level await would block the server from accepting new connections
     // while a slow upstream is in flight.
     if (method == 'POST' && (path == '/v1/messages' || path == '/messages')) {
-      unawaited(_proxyAnthropic(req));
+      unawaited(_proxyAnthropic(req).then((_) => _logRequest(path, method, stream: true)));
       return;
     }
     if (method == 'POST' && path == '/v1/chat/completions') {
-      unawaited(_proxyOpenAi(req));
+      unawaited(_proxyOpenAi(req).then((_) => _logRequest(path, method, stream: true)));
       return;
     }
 
@@ -357,8 +378,7 @@ class ServerController {
           UsageStore().record(o);
         },
         onLog: (msg) {
-          // ignore: avoid_print
-          print('[${DateTime.now().toIso8601String()}] $msg');
+          LogStore.info(msg);
         },
         trimSystemPrompt: configStore.config.trimSystemPrompt,
       );

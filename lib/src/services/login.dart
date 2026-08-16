@@ -245,17 +245,18 @@ button { margin-top:12px; width:100%; padding:10px; background:#2a6df4; color:#f
 </style></head><body><main>
  <h1>agrout-bridge — AgentRouter sign-in</h1>
 <p>AgentRouter accounts are created through GitHub or LinuxDO OAuth only.
-Sign in with a provider, then paste the session token back here, or paste
-your API key (`sk-...`) from the agentrouter.org dashboard directly.</p>
-<a class="btn btn-github" href="/oauth/github">Sign in with GitHub</a>
-<a class="btn btn-linuxdo" href="/oauth/linuxdo">Sign in with LinuxDO</a>
+Open a provider sign-in below (opens in a new tab), then paste the resulting
+session token into the field, or paste your API key (`sk-...`) from the
+agentrouter.org dashboard directly.</p>
+<a class="btn btn-github" href="/oauth/github" target="_blank">Sign in with GitHub</a>
+<a class="btn btn-linuxdo" href="/oauth/linuxdo" target="_blank">Sign in with LinuxDO</a>
 <div class="sep"></div>
 <form method="POST" action="/login/token">
   <label>API key / session token (sk-...)</label>
   <input type="password" name="token" placeholder="paste API key from agentrouter.org dashboard" required>
   <button type="submit">Save key</button>
 </form>
-<p class="note">This page is served from 127.0.0.1 by your running agrout-bridge process. Provider OAuth happens in the agentrouter.org browser flow; the bridge cannot read the agentrouter session cookie, so the token is pasted manually. Your dashboard API key works for proxying and for quota/usage display (Profile page), with no session token needed.</p>
+<p class="note">This page is served from 127.0.0.1 by your running agrout-bridge process. Provider OAuth opens in a new tab so you can return here to paste the token; the bridge cannot read the agentrouter session cookie. Your dashboard API key works for proxying and for quota/usage display (Profile page), with no session token needed.</p>
 <script>
 const p = new URLSearchParams(location.search);
 if (p.get('err')) {
@@ -275,8 +276,8 @@ main { max-width:360px; margin:0 auto; }
 h1 { color:#7fd4ff; font-size:16px; }
 .note { color:#7c8693; font-size:12px; margin-top:18px; }
 </style></head><body><main>
-<h1>Login berhasil</h1>
-<p>Session token tersimpan lokal di profil. Tutup tab ini dan kembali ke agrout-bridge.</p>
+<h1>Sign-in successful</h1>
+<p>Your session token has been saved to the active profile. You can close this tab and return to the agrout-bridge TUI.</p>
 <p class="note">agrout-bridge</p>
 </main></body></html>
 ''';
