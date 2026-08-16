@@ -81,6 +81,27 @@ void _loadStores(ProfileStore profiles, ConfigStore config) {
   }
 }
 
+/// Quietly check for an update (1h cached lookup) and print a notice before
+/// the bridge starts, so both headless and TUI operators see it. Best-effort:
+/// failures are silently ignored.
+Future<void> _printUpdateNoticeIfAny() async {
+  try {
+    final latest = await Updater().fetchLatestTag();
+    final cur = Updater.parseSemver(bridgeVersion);
+    final nxt = latest == null ? null : Updater.parseSemver(latest);
+    if (cur != null && nxt != null && Updater.compareSemver(nxt, cur) > 0) {
+      stdout.writeln();
+      stdout.writeln('Update available: v$bridgeVersion -> v$latest');
+      stdout.writeln('Run `agrout-bridge update` to install it, or press [Shift+U] in the TUI.');
+      stdout.writeln();
+      stdout.flush();
+      LogStore.info('Update available: v$bridgeVersion -> v$latest');
+    }
+  } catch (_) {
+    // Best-effort; never block startup on a network blip.
+  }
+}
+
 Future<void> _runCommand(List<String> args) async {
   final profiles = ProfileStore();
   final config = ConfigStore();
@@ -91,6 +112,10 @@ Future<void> _runCommand(List<String> args) async {
   // mode records requests too. TUI mode re-inits in `AppState.initState`,
   // which is idempotent (reloads the same file).
   LogStore.init();
+  // Check for an update before the bridge starts (best-effort, 1h
+  // cache). Print the notice in both headless and TUI modes so the operator
+  // sees it before the proxy UI takes over the screen.
+  await _printUpdateNoticeIfAny();
   final controller = ServerController(profiles: profiles, configStore: config);
   final boundPort = await controller.start();
   await controller.refreshModels();

@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.1.20 (2026-08-16)
+
+### Feat
+
+- **Update available notification.** The TUI compares the 1-hour-cached
+  GitHub tag against `bridgeVersion` on startup (and when version state
+  changes): when a newer stable exists, the header shows a bright amber
+  `Update Available! vX.Y.Z` badge and the footer adds a `[Shift+U] update`
+  keymap in the same color. `[Shift+U]` opens a confirm dialog (same
+  palette); confirming stops the proxy, spawns a detached
+  `agrout-bridge update` inheriting stdout, and shuts the TUI down cleanly
+  (nocterm restores the terminal before exit, so the child's progress
+  prints on a healthy screen). Headless and TUI modes also print the update
+  notice before the proxy starts.
+
+### Polish
+
+- Footer keymap colors: `[h] help` is info blue, `[q] quit` is bright red,
+  `[Ctrl+L] log` is a distinct violet, each bold.
+
 ## v0.1.19 (2026-08-16)
 
 ### Improve

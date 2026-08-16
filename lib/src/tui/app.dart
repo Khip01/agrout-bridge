@@ -8,6 +8,7 @@ import '../models/version.dart';
 import '../services/api_client.dart';
 import '../services/login.dart';
 import '../services/log_store.dart';
+import '../services/updater.dart';
 import '../services/usage_store.dart';
 import '../server/server_controller.dart';
 import 'clipboard.dart';
@@ -25,7 +26,7 @@ class AgroutApp extends StatefulComponent {
   State<AgroutApp> createState() => AppState();
 }
 
-enum _Panel { main, help, quit, login, portConfig, deleteConfirm }
+enum _Panel { main, help, quit, login, portConfig, deleteConfirm, updateConfirm }
 
 enum _InfoPage { profile, usage, models, proxy }
 
@@ -83,6 +84,9 @@ class AppState extends State<AgroutApp> {
   int _lastUsageVersion = 0; // UsageStore.version advances on every record()
   DateTime? _lastRefreshAt; // last foreground refresh timestamp
 
+  /// Latest stable tag from GitHub, when newer than [bridgeVersion].
+  String? _updateTag;
+
   static const _pageNames = ['Profile', 'Usage & Cost', 'Models', 'Proxy Config'];
 
   @override
@@ -92,6 +96,7 @@ class AppState extends State<AgroutApp> {
     LogStore.info('agrout-bridge starting...');
     _startPageRefresh();
     unawaited(_refreshBilling());
+    unawaited(_checkForUpdate());
   }
 
   @override
@@ -218,6 +223,17 @@ class AppState extends State<AgroutApp> {
       }
       return false;
     }
+    if (_panel == _Panel.updateConfirm) {
+      if (e.logicalKey == LogicalKey.keyY || e.logicalKey == LogicalKey.enter) {
+        unawaited(_doUpdate());
+        return true;
+      }
+      if (e.logicalKey == LogicalKey.keyN || e.logicalKey == LogicalKey.escape) {
+        _cancelUpdate();
+        return true;
+      }
+      return false;
+    }
     if (_panel == _Panel.login) {
       // Login panel: [c] copy URL, [Esc] close (and stop server).
       if (e.logicalKey == LogicalKey.keyC && !e.isControlPressed) {
@@ -268,6 +284,14 @@ class AppState extends State<AgroutApp> {
     if (e.logicalKey == LogicalKey.keyA) { _copyEndpoint(openai: false); return true; }
     if (e.logicalKey == LogicalKey.keyP) { _openPortConfig(); return true; }
     if (e.logicalKey == LogicalKey.keyL) { _openLoginPanel(); return true; }
+    if (e.logicalKey == LogicalKey.keyU && e.isShiftPressed && !e.isControlPressed) {
+      if (_updateTag != null) {
+        _askUpdate();
+        return true;
+      }
+      _setStatus('No update available', duration: 3);
+      return true;
+    }
     if (e.logicalKey == LogicalKey.keyH) { _panel = _Panel.help; _pageRefreshTimer?.cancel(); setState(() {}); return true; }
     if (e.logicalKey == LogicalKey.keyQ) { _panel = _Panel.quit; _pageRefreshTimer?.cancel(); setState(() {}); return true; }
     if (_showLog) {
@@ -498,6 +522,27 @@ class AppState extends State<AgroutApp> {
     setState(() {});
   }
 
+  /// Quietly compare the latest GitHub tag against [bridgeVersion] using the
+  /// updater's 1h-cached lookup (no force refresh). Sets [_updateTag] when a
+  /// newer stable version exists; never throws or blocks the UI.
+  Future<void> _checkForUpdate() async {
+    try {
+      final latest = await Updater().fetchLatestTag();
+      final cur = Updater.parseSemver(bridgeVersion);
+      final nxt = latest == null ? null : Updater.parseSemver(latest);
+      if (cur != null &&
+          nxt != null &&
+          Updater.compareSemver(nxt, cur) > 0) {
+        if (_updateTag != latest) {
+          _updateTag = latest;
+          if (mounted) setState(() {});
+        }
+      }
+    } catch (_) {
+      // Update check is best-effort; never fail the bridge over a network blip.
+    }
+  }
+
   void _doRefresh() async {
     if (_loadingModels) return;
     _loadingModels = true;
@@ -570,6 +615,16 @@ class AppState extends State<AgroutApp> {
       child: Row(
         children: [
           Text(' agrout-bridge v$bridgeVersion', style: TextStyle(color: Colors.cyan)),
+          if (_updateTag != null) ...[
+            Text('   ', style: const TextStyle(color: Colors.grey)),
+            Text(
+              'Update Available! v$_updateTag',
+              style: const TextStyle(
+                color: Color(0xFFFFD75E), // bright amber, distinct from the muted palette
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
           const Spacer(),
           Text(_activeProfileLabel(), style: const TextStyle(color: Colors.grey)),
           Text('  [${_pageTab(_infoPage)}] ', style: const TextStyle(color: Colors.yellow, fontWeight: FontWeight.bold)),
@@ -594,6 +649,7 @@ class AppState extends State<AgroutApp> {
     if (_panel == _Panel.help) return _helpPanel();
     if (_panel == _Panel.quit) return _quitPanel();
     if (_panel == _Panel.deleteConfirm) return _deleteConfirmPanel();
+    if (_panel == _Panel.updateConfirm) return _updateConfirmPanel();
     if (_panel == _Panel.login) return _loginPanel();
     if (_panel == _Panel.portConfig) return _portConfigPanel();
 
@@ -933,10 +989,14 @@ class AppState extends State<AgroutApp> {
     final navStyle = TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold);
     final actionStyle = TextStyle(color: const Color(0xFF8BD4BA), fontWeight: FontWeight.bold); // soft green
     final cfgStyle = TextStyle(color: const Color(0xFFD19A66)); // amber
+    final updateStyle = TextStyle(color: const Color(0xFFFFD75E), fontWeight: FontWeight.bold); // bright amber, matches badge
+    final infoStyle = TextStyle(color: const Color(0xFF5BA4F5), fontWeight: FontWeight.bold); // info blue
+    final dangerStyle = TextStyle(color: const Color(0xFFFF6B6B), fontWeight: FontWeight.bold); // bright red
+    final ctrlStyle = TextStyle(color: const Color(0xFF9C8FFF), fontWeight: FontWeight.bold); // violet, distinct from nav/action
     if (_panel != _Panel.main) {
       final hint = _panel == _Panel.login
           ? '[c] copy URL | [Esc] close'
-          : _panel == _Panel.deleteConfirm
+          : _panel == _Panel.deleteConfirm || _panel == _Panel.updateConfirm
               ? '[y] confirm  [n] cancel'
               : '[Esc] back';
       return Padding(
@@ -960,12 +1020,20 @@ class AppState extends State<AgroutApp> {
         else
           Text('[l] ', style: cfgStyle),
         Text('login  ', style: _hasNoKey ? actionStyle : base),
-        Text('[h] ', style: base),
-        Text('help  ', style: base),
-        Text('[q] ', style: base),
-        Text('quit  ', style: base),
-        Text('[Ctrl+L] ', style: base),
-        Text('log', style: base),
+        if (_updateTag != null)
+          Text('[Shift+U] ', style: updateStyle)
+        else
+          const Text(''),
+        if (_updateTag != null)
+          Text('update  ', style: updateStyle)
+        else
+          const Text(''),
+        Text('[h] ', style: infoStyle),
+        Text('help  ', style: infoStyle),
+        Text('[q] ', style: dangerStyle),
+        Text('quit  ', style: dangerStyle),
+        Text('[Ctrl+L] ', style: ctrlStyle),
+        Text('log', style: ctrlStyle),
         ..._pageScopedFooter(base),
       ]),
     );
@@ -1169,6 +1237,7 @@ class AppState extends State<AgroutApp> {
     add('Other:', Colors.cyan);
     add('  [p]  Port configuration panel');
     add('  [l]  Open login URL (paste API key)');
+    if (_updateTag != null) add('  [Shift+U]  Update to v$_updateTag (stops the bridge)');
     add('  [h]  Help');
     add('  [q]  Quit');
 
@@ -1185,6 +1254,59 @@ class AppState extends State<AgroutApp> {
         const Text('Delete profile?', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF8A8A))),
         const SizedBox(height: 1),
         Text('Remove "${target?.name ?? ''}" and its API key?'),
+        const SizedBox(height: 1),
+        const Text('[y] Yes  [n] No'),
+      ]),
+    ));
+  }
+
+  // ── Update confirmation ───────────────────────────────────────────
+  void _askUpdate() {
+    _pageRefreshTimer?.cancel();
+    _panel = _Panel.updateConfirm;
+    setState(() {});
+  }
+
+  void _cancelUpdate() {
+    _panel = _Panel.main;
+    _startPageRefresh();
+    setState(() {});
+  }
+
+  /// Perform the update: stop the proxy (release the port), spawn a detached
+  /// `agrout-bridge update` child that inherits stdout so its progress prints
+  /// to the terminal after the TUI exits, then shut the TUI down cleanly.
+  /// `shutdownApp()` restores the terminal before exit, so the child's output
+  /// lands on a healthy screen (the same flow as running `update` by hand).
+  Future<void> _doUpdate() async {
+    await _proxy.stop();
+    stdout.writeln('agrout-bridge v$bridgeVersion -> v$_updateTag, updating...');
+    stdout.flush();
+    try {
+      Process.start(
+        Platform.resolvedExecutable,
+        ['update'],
+        mode: ProcessStartMode.detachedWithStdio,
+      );
+    } catch (e) {
+      stdout.writeln('Could not launch update automatically.');
+      stdout.writeln('Run this manually:  agrout-bridge update');
+      stdout.flush();
+    }
+    shutdownApp(0);
+  }
+
+  Component _updateConfirmPanel() {
+    final amber = const Color(0xFFFFD75E);
+    return Center(child: Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(border: BoxBorder.all(color: amber)),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('Update Available!', style: TextStyle(fontWeight: FontWeight.bold, color: amber)),
+        const SizedBox(height: 1),
+        Text('agrout-bridge v$bridgeVersion -> v$_updateTag'),
+        const SizedBox(height: 1),
+        const Text('The bridge will be closed and updated.'),
         const SizedBox(height: 1),
         const Text('[y] Yes  [n] No'),
       ]),

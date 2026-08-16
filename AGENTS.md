@@ -363,7 +363,8 @@ with `package.json` when bumping a release.
 | `o` | Main | Copy OpenAI endpoint URL to clipboard |
 | `a` | Main | Copy Anthropic endpoint URL to clipboard |
 | `p` | Main | Port configuration panel |
-| `l` | Main | Login panel (sign-in link) |
+| `l` | Main | Login panel (paste API key) |
+| `Shift+U` | Main | Update the bridge (shown only when a newer stable exists) |
 | `h` | Main | Help panel |
 | `q` | Main | Quit confirmation |
 | `up/down` | Main | Scroll / navigate |

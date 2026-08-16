@@ -42,6 +42,7 @@ log is a sidebar, fullscreen log when toggled.
 | `a` | Copy Anthropic endpoint URL to clipboard |
 | `p` | Port configuration panel |
 | `l` | Local sign-in link panel (paste API key) |
+| `Shift+U` | Update the bridge (shown when a newer stable exists) |
 | `h` | Help panel |
 | `q` | Quit confirmation |
 | `Ctrl+L` | Toggle log side panel |
