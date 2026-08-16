@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.1.21 (2026-08-16)
+
+### Fix
+
+- **Port configuration now gives feedback and requires a test before save.**
+  Previously pressing Enter in the dialog did nothing (the focused TextField
+  consumed Enter, and the scan result was only shown, never actionable). The
+  dialog is now a state machine: type a new port, press `[t] test` to probe
+  it (status shows `Testing port X...`, then green "available" or red "in
+  use, try another"), and only after a successful test does `[Enter] save`
+  light up and actually persist the port. Keys follow the
+  grey-is-disabled convention: `[t]`/`[Enter]` are grey until relevant, and
+  `[Esc] back` is red. The auto-increment fallback (silently switching to
+  the next free port) was removed in favor of the explicit test flow.
+- **Uptime keeps ticking while a dialog is open.** The 1s refresh timer
+  early-returned when a panel was shown, freezing the header/status clock;
+  it now always re-renders uptime/status/footer, gating only the page-body
+  dirty checks on the main panel.
+
+### Improve
+
+- **Footer keymap labels are colored uniformly.** Previously the `[1-4]`,
+  `[r]`, `[o]/[a]`, `[p]`, `[l]` keys were colored but their labels
+  (page/refresh/copy endpoint/port/login) stayed grey. All key+label pairs
+  now share one color per group. `[h]` info blue, `[q]` danger red,
+  `[Ctrl+L]` violet stay as-is.
+- **Log panel keys are violet to match the footer.** `[f]ull`, `[C]lear`,
+  `[O]ld` and the `LOG` title now use the same violet as the footer's
+  `[Ctrl+L]`, signaling the log window's keymap belongs to it.
+- **Header shows all pages with the active one highlighted.**
+  `key name: X  |  [1] Profile [2] Usage & Cost [3] Models [4] Proxy Config
+  | port: 8318`. The key name and port values are colored; the labels
+  (`key name:`, `| port:`) stay grey. The active page is lit amber with a
+  white label; the rest are grey.
+- **TUI has top/bottom padding and breathing room.** A one-line gutter above
+  the header and below the status bar separates the UI from the terminal
+  edge, and the header/status text no longer has a stray leading space, so
+  it aligns flush with the page content.
+- **Refresh indicator is labeled and humanized.** The right-hand status now
+  reads `refresh: 12m 3s ago` (or `Xs ago` under a minute) instead of a bare
+  `467s ago`, so it is not confused with `uptime`.
+
+### Test
+
+- `test/tui_format_test.dart`: `formatDuration` coverage (zero, seconds,
+  minute rollover, hour boundary, hours+minutes+seconds, multi-day uptimes).
+
 ## v0.1.20 (2026-08-16)
 
 ### Feat

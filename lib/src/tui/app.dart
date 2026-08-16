@@ -15,6 +15,14 @@ import 'clipboard.dart';
 
 /// Top-level TUI for `agrout-bridge`. Mirrors the commandcode-bridge layout:
 /// header / 4 info pages / log side panel / status bar / footer, with
+/// Format an elapsed duration as `Xh Ym Zs` (0-padded, stable for tests).
+String formatDuration(Duration d) {
+  final h = d.inHours;
+  final m = d.inMinutes.remainder(60);
+  final s = d.inSeconds.remainder(60);
+  return '${h}h ${m}m ${s}s';
+}
+
 /// context-scoped keymap (login + port-config + help + quit panels).
 class AgroutApp extends StatefulComponent {
   final ProfileStore profileStore;
@@ -41,6 +49,11 @@ enum _ClearScope { none, all, beforeToday }
 ///   failed   → key rejected / error (red, show reason, focus Copy URL)
 enum _LoginState { idle, loading, success, failed }
 
+/// Port-configuration dialog lifecycle. Keys follow the disabled(active)
+/// convention: grey = disabled. The new port must be tested ([t] test) before
+/// it can be saved ([Enter] save).
+enum _PortState { idle, testing, success, failed }
+
 class AppState extends State<AgroutApp> {
   late final _profiles = component.profileStore;
   late final _config = component.configStore;
@@ -65,6 +78,9 @@ class AppState extends State<AgroutApp> {
   bool _loadingBilling = false;
 
   final _portCtrl = TextEditingController();
+  _PortState _portState = _PortState.idle;
+  int? _portTested; // port that passed a live test (enables [Enter] save)
+  int? _portAttempt; // port currently running a test (shows "testing port X")
   bool _portScanDone = false;
   final Map<int, bool> _portStatus = {};
 
@@ -111,33 +127,32 @@ class AppState extends State<AgroutApp> {
   }
 
   void _startPageRefresh() {
-    // Refresh every second. Header (uptime + profile) and footer (stream
-    // count) update in real-time; page body content uses dirty checks to
-    // avoid unnecessary re-render when nothing changed. This mirrors the
-    // commandcode-bridge refresh model (1s tick, version-gated body).
+    // Refresh every second. Header (uptime + profile) and footer update in
+    // real-time; the clock must keep ticking even while a dialog is open, so
+    // only the page-body dirty checks are gated on the main panel.
     _pageRefreshTimer?.cancel();
     _pageRefreshTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted || _panel != _Panel.main) return;
+      if (!mounted) return;
 
       bool contentChanged = false;
-      if (_showLog && _lastLogVersion != LogStore.version) {
-        _lastLogVersion = LogStore.version;
-        contentChanged = true;
-      }
-      if (_lastModelVersion != _proxy.modelCacheVersion) {
-        _lastModelVersion = _proxy.modelCacheVersion;
-        contentChanged = true;
-      }
-      final usageVersion = UsageStore().version;
-      if (_infoPage == _InfoPage.usage && _lastUsageVersion != usageVersion) {
-        _lastUsageVersion = usageVersion;
-        contentChanged = true;
+      if (_panel == _Panel.main) {
+        if (_showLog && _lastLogVersion != LogStore.version) {
+          _lastLogVersion = LogStore.version;
+          contentChanged = true;
+        }
+        if (_lastModelVersion != _proxy.modelCacheVersion) {
+          _lastModelVersion = _proxy.modelCacheVersion;
+          contentChanged = true;
+        }
+        final usageVersion = UsageStore().version;
+        if (_infoPage == _InfoPage.usage && _lastUsageVersion != usageVersion) {
+          _lastUsageVersion = usageVersion;
+          contentChanged = true;
+        }
       }
 
-      // Uptime lives in the header which re-renders on every setState, so we
-      // always call setState to tick the clock. The body ListView is rebuilt
-      // but nocterm batches the render, matching commandcode-bridge's clean
-      // header/uptime update pattern.
+      // Uptime/status/footer re-render on every second regardless of panel:
+      // the header clock keeps ticking while any dialog is open.
       if (contentChanged || _lastStatusTick != _tickSeconds()) {
         _lastStatusTick = _tickSeconds();
         setState(() {});
@@ -175,13 +190,18 @@ class AppState extends State<AgroutApp> {
     return Focusable(
       focused: true,
       onKeyEvent: _onKey,
-      child: Column(
-        children: [
-          _buildHeader(),
-          Expanded(child: _buildBody()),
-          _buildStatusBar(),
-          _buildFooter(),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.only(top: 1, left: 1, right: 1, bottom: 1),
+        child: Column(
+          children: [
+            _buildHeader(),
+            Expanded(child: _buildBody()),
+            Container(height: 1, color: Colors.grey),
+            _buildStatusBar(),
+            Container(height: 1), // breathing room before the footer keymap
+            _buildFooter(),
+          ],
+        ),
       ),
     );
   }
@@ -292,8 +312,8 @@ class AppState extends State<AgroutApp> {
       _setStatus('No update available', duration: 3);
       return true;
     }
-    if (e.logicalKey == LogicalKey.keyH) { _panel = _Panel.help; _pageRefreshTimer?.cancel(); setState(() {}); return true; }
-    if (e.logicalKey == LogicalKey.keyQ) { _panel = _Panel.quit; _pageRefreshTimer?.cancel(); setState(() {}); return true; }
+    if (e.logicalKey == LogicalKey.keyH) { _panel = _Panel.help; setState(() {}); return true; }
+    if (e.logicalKey == LogicalKey.keyQ) { _panel = _Panel.quit; setState(() {}); return true; }
     if (_showLog) {
       // Pending clear confirmation takes priority over every other log key.
       if (_confirmClear != _ClearScope.none) {
@@ -484,7 +504,6 @@ class AppState extends State<AgroutApp> {
       return;
     }
     _pendingDeleteProfile = profiles[_selectedProfileIndex];
-    _pageRefreshTimer?.cancel();
     _panel = _Panel.deleteConfirm;
     setState(() {});
   }
@@ -614,7 +633,7 @@ class AppState extends State<AgroutApp> {
       padding: const EdgeInsets.symmetric(horizontal: 1),
       child: Row(
         children: [
-          Text(' agrout-bridge v$bridgeVersion', style: TextStyle(color: Colors.cyan)),
+          Text('agrout-bridge v$bridgeVersion', style: TextStyle(color: Colors.cyan)),
           if (_updateTag != null) ...[
             Text('   ', style: const TextStyle(color: Colors.grey)),
             Text(
@@ -626,10 +645,23 @@ class AppState extends State<AgroutApp> {
             ),
           ],
           const Spacer(),
-          Text(_activeProfileLabel(), style: const TextStyle(color: Colors.grey)),
-          Text('  [${_pageTab(_infoPage)}] ', style: const TextStyle(color: Colors.yellow, fontWeight: FontWeight.bold)),
-          Text(_pageNames[_infoPage.index], style: const TextStyle(color: Colors.white)),
-          Text('  port $port', style: const TextStyle(color: Colors.grey)),
+          // Every page shown in a row; the active one is lit, the rest dimmed.
+          Text('key name: ', style: const TextStyle(color: Colors.grey)),
+          Text(_activeProfileLabel(),
+              style: const TextStyle(color: Color(0xFF8BD4BA), fontWeight: FontWeight.bold)),
+          Text('  |  ', style: const TextStyle(color: Colors.grey)),
+          for (var i = 0; i < _pageNames.length; i++) ...[
+            Text('[${_pageTab(_InfoPage.values[i])}] ',
+                style: i == _infoPage.index
+                    ? const TextStyle(color: Color(0xFFFFD75E), fontWeight: FontWeight.bold)
+                    : const TextStyle(color: Colors.grey)),
+            Text('${_pageNames[i]}  ',
+                style: i == _infoPage.index
+                    ? const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)
+                    : const TextStyle(color: Colors.grey)),
+          ],
+          Text(' | port: ', style: const TextStyle(color: Colors.grey)),
+          Text('$port', style: const TextStyle(color: Color(0xFFD19A66), fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -935,10 +967,7 @@ class AppState extends State<AgroutApp> {
   Component _buildStatusBar() {
     final s = _proxy.status();
     final uptime = DateTime.now().difference(s.startedAt);
-    final h = uptime.inHours;
-    final m = uptime.inMinutes.remainder(60);
-    final sec = uptime.inSeconds.remainder(60);
-    final upStr = '${h}h ${m}m ${sec}s';
+    final upStr = formatDuration(uptime);
     final streams = s.activeStreams;
 
     // Left indicator: single source of truth, no duplicated text.
@@ -964,10 +993,10 @@ class AppState extends State<AgroutApp> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 1),
       child: Row(children: [
-        Text(' $leftText', style: TextStyle(color: leftColor)),
+        Text(leftText, style: TextStyle(color: leftColor)),
         const Spacer(),
         Text('  uptime: $upStr', style: const TextStyle(color: Colors.grey)),
-        Text('  ${_refreshLabel()}', style: TextStyle(color: _proxyLoadingColor())),
+        Text('  refresh: ${_refreshLabel()}', style: TextStyle(color: _proxyLoadingColor())),
       ]),
     );
   }
@@ -979,8 +1008,13 @@ class AppState extends State<AgroutApp> {
   String _refreshLabel() {
     if (_loadingModels) return 'Refreshing…';
     if (_lastRefreshAt == null) return 'Idle';
-    final secs = DateTime.now().difference(_lastRefreshAt!).inSeconds;
-    return '${secs}s ago';
+    final d = DateTime.now().difference(_lastRefreshAt!);
+    if (d.inMinutes >= 1) {
+      final m = d.inMinutes.remainder(60);
+      final s = d.inSeconds.remainder(60);
+      return '${d.inHours}h ${m}m ${s}s ago';
+    }
+    return '${d.inSeconds}s ago';
   }
 
   // ── Footer ────────────────────────────────────────────────────────
@@ -1008,18 +1042,18 @@ class AppState extends State<AgroutApp> {
       padding: const EdgeInsets.symmetric(horizontal: 1),
       child: Row(children: [
         Text('[1-4] ', style: navStyle),
-        Text('page  ', style: base),
+        Text('page  ', style: navStyle),
         Text('[r] ', style: actionStyle),
-        Text('refresh  ', style: base),
+        Text('refresh  ', style: actionStyle),
         Text('[o]/[a] ', style: actionStyle),
-        Text('copy endpoint  ', style: base),
+        Text('copy endpoint  ', style: actionStyle),
         Text('[p] ', style: cfgStyle),
-        Text('port  ', style: base),
+        Text('port  ', style: cfgStyle),
         if (_hasNoKey)
           Text('[l] ', style: actionStyle)
         else
           Text('[l] ', style: cfgStyle),
-        Text('login  ', style: _hasNoKey ? actionStyle : base),
+        Text('login  ', style: _hasNoKey ? actionStyle : cfgStyle),
         if (_updateTag != null)
           Text('[Shift+U] ', style: updateStyle)
         else
@@ -1119,11 +1153,11 @@ class AppState extends State<AgroutApp> {
     }
     return Column(children: [
       Row(children: [
-        Text(fullscreen ? ' LOG (fullscreen)' : ' LOG', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.cyan)),
+        Text(fullscreen ? ' LOG (fullscreen)' : ' LOG', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF9C8FFF))),
         const Spacer(),
-        if (!fullscreen) const Text('[f]ull ', style: TextStyle(color: Colors.grey)),
-        const Text('[C]lear ', style: TextStyle(color: Colors.grey)),
-        const Text('[O]ld ', style: TextStyle(color: Colors.grey)),
+        if (!fullscreen) const Text('[f]ull ', style: TextStyle(color: Color(0xFF9C8FFF))),
+        const Text('[C]lear ', style: TextStyle(color: Color(0xFF9C8FFF))),
+        const Text('[O]ld ', style: TextStyle(color: Color(0xFF9C8FFF))),
       ]),
       Container(height: 1, color: Colors.grey),
       if (_confirmClear != _ClearScope.none)
@@ -1262,7 +1296,6 @@ class AppState extends State<AgroutApp> {
 
   // ── Update confirmation ───────────────────────────────────────────
   void _askUpdate() {
-    _pageRefreshTimer?.cancel();
     _panel = _Panel.updateConfirm;
     setState(() {});
   }
@@ -1342,56 +1375,144 @@ class AppState extends State<AgroutApp> {
   // ── Port config panel ─────────────────────────────────────────────
   void _openPortConfig() {
     _portCtrl.text = _config.config.serverPort.toString();
+    _portState = _PortState.idle;
+    _portTested = null;
+    _portAttempt = null;
     _portScanDone = false;
     _portStatus.clear();
     _panel = _Panel.portConfig;
-    _pageRefreshTimer?.cancel();
     _scanPort(_config.config.serverPort);
     setState(() {});
   }
 
-  Future<void> _scanPort(int port) async {
-    _portScanDone = false;
+  /// Probe whether [port] is free (bind + close). Returns true when free.
+  Future<bool> _probePort(int port) async {
     try {
       final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, port);
       await s.close();
-      _portStatus[port] = true;
+      return true;
     } catch (_) {
-      _portStatus[port] = false;
+      return false;
     }
+  }
+
+  Future<void> _scanPort(int port) async {
+    _portScanDone = false;
+    final free = await _probePort(port);
+    _portStatus[port] = free;
     _portScanDone = true;
     if (mounted) setState(() {});
   }
 
-  Future<void> _doSetPort() async {
+  /// Parsed desired port from the field. Empty = default; unparsable = -1.
+  int _parsedPort() {
     final raw = _portCtrl.text.trim();
-    int desired;
-    if (raw.isEmpty) {
-      desired = AppConfig.defaultPort;
-    } else {
-      desired = int.tryParse(raw) ?? -1;
-    }
-    if (desired < 1024 || desired > 65535) {
-      _setStatus('Invalid port (1024-65535)', duration: 3);
+    if (raw.isEmpty) return AppConfig.defaultPort;
+    return int.tryParse(raw) ?? -1;
+  }
+
+  bool get _portTestable {
+    if (_portState == _PortState.testing) return false;
+    final p = _parsedPort();
+    return p >= 1024 && p <= 65535 && p != _config.config.serverPort;
+  }
+
+  bool get _portSavable {
+    final p = _parsedPort();
+    return _portState == _PortState.success &&
+        _portTested != null &&
+        _portTested == p &&
+        p != _config.config.serverPort;
+  }
+
+  /// [t] test: probe the new port. On success it becomes savable and [Enter]
+  /// save lights up; on failure it stays red so the user picks another port.
+  Future<void> _doPortTest() async {
+    final p = _parsedPort();
+    if (!_portTestable) {
+      _setStatus('Enter a different port to test', duration: 3);
       return;
     }
-    var p = desired;
-    // auto-increment scan
-    while ((_portStatus[p] == false) && p < 65535) {
-      p++;
-      await _scanPort(p);
+    _portState = _PortState.testing;
+    _portAttempt = p;
+    _portScanDone = false;
+    setState(() {});
+    final free = await _probePort(p);
+    _portStatus[p] = free;
+    _portScanDone = true;
+    _portAttempt = null;
+    _portState = free ? _PortState.success : _PortState.failed;
+    _portTested = free ? p : null;
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _doSetPort() async {
+    if (!_portSavable) {
+      _setStatus('Test the new port first ([t])', duration: 3);
+      return;
     }
-    if (p != desired) {
-      _setStatus('Port $desired in use, using $p instead', duration: 4);
-    }
+    final p = _portTested!;
     _config.config.serverPort = p;
     _config.save();
     _panel = _Panel.main;
     _startPageRefresh();
     setState(() {});
+    _setStatus('Port set to $p', duration: 3);
+    LogStore.info('Port set to $p');
+  }
+
+  /// Intercept port-field keys: [t] test, Enter save, Esc back. Typing still
+  /// reaches the field for digits/backspace.
+  bool _onPortKey(KeyboardEvent e) {
+    final lk = e.logicalKey;
+    if (lk == LogicalKey.keyT && !e.isControlPressed) {
+      _doPortTest();
+      return true;
+    }
+    if (lk == LogicalKey.enter) {
+      _doSetPort();
+      return true;
+    }
+    if (lk == LogicalKey.escape) {
+      _panel = _Panel.main;
+      _startPageRefresh();
+      setState(() {});
+      return true;
+    }
+    return false; // let the field handle digits, backspace, arrows
   }
 
   Component _portConfigPanel() {
+    final p = _parsedPort();
+
+    // Status line: testing (muted white), success (green), failed (red),
+    // else the idle scan of the current port.
+    String statusText;
+    Color statusColor;
+    if (_portState == _PortState.testing) {
+      statusText = 'Testing port ${_portAttempt ?? _parsedPort()}...';
+      statusColor = const Color(0xFFD0D0D0); // muted white, distinct from grey disabled
+    } else if (_portState == _PortState.success) {
+      statusText = 'Port $p is available';
+      statusColor = const Color(0xFF8BD4BA); // success green
+    } else if (_portState == _PortState.failed) {
+      statusText = 'Port $p is in use, try another';
+      statusColor = const Color(0xFFFF8A8A); // error red
+    } else if (_portScanDone) {
+      final s = _portStatus.entries.map((e) => '${e.key}=${e.value ? "free" : "in-use"}').join(', ');
+      statusText = 'Scan: $s';
+      statusColor = Colors.grey;
+    } else {
+      statusText = 'Scanning...';
+      statusColor = Colors.grey;
+    }
+
+    // Keymap: grey = disabled. [t] test needs a different port; [Enter] save
+    // only lights up after a successful test of that port; [Esc] is red.
+    final disabled = TextStyle(color: Colors.grey);
+    final active = TextStyle(color: const Color(0xFF5BA4F5), fontWeight: FontWeight.bold); // info blue
+    final esc = TextStyle(color: const Color(0xFFFF6B6B), fontWeight: FontWeight.bold); // red
+
     return Center(child: Container(
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(border: BoxBorder.all(color: Colors.cyan)),
@@ -1400,11 +1521,36 @@ class AppState extends State<AgroutApp> {
         const SizedBox(height: 1),
         Text('Current: ${_config.config.serverPort}   Enter new port (empty = reset to ${AppConfig.defaultPort})'),
         const SizedBox(height: 1),
-        SizedBox(width: 24, child: TextField(controller: _portCtrl, focused: true)),
+        SizedBox(
+          width: 24,
+          child: TextField(
+            controller: _portCtrl,
+            focused: true,
+            onChanged: (_) {
+              // Editing invalidates any previous test result.
+              if (_portState != _PortState.idle ||
+                  _portTested != null ||
+                  _portStatus.isNotEmpty) {
+                _portState = _PortState.idle;
+                _portTested = null;
+                _portAttempt = null;
+                _portStatus.clear();
+                _portScanDone = false;
+                setState(() {});
+              }
+            },
+            onKeyEvent: _onPortKey,
+          ),
+        ),
         const SizedBox(height: 1),
-        Text(_portScanDone ? 'Scan: ${_portStatus.entries.map((e) => "${e.key}=${e.value ? "free" : "in-use"}").join(", ")}' : 'Scanning...', style: const TextStyle(color: Colors.grey)),
+        Text(statusText, style: TextStyle(color: statusColor)),
         const SizedBox(height: 1),
-        const Text('[Enter] save   [Esc] back', style: TextStyle(color: Colors.grey)),
+        Text('[t] ', style: _portTestable ? active : disabled),
+        Text('test  ', style: _portTestable ? active : disabled),
+        Text('[Enter] ', style: _portSavable ? active : disabled),
+        Text('save  ', style: _portSavable ? active : disabled),
+        Text('[Esc] ', style: esc),
+        Text('back', style: esc),
       ]),
     ));
   }
@@ -1420,7 +1566,6 @@ class AppState extends State<AgroutApp> {
     // Reset dialog state into the idle state: URL will be highlighted,
     // Copy URL is the focused action, no error text.
     _panel = _Panel.login;
-    _pageRefreshTimer?.cancel();
     _loginState = _LoginState.loading;
     _loginError = null;
     _loginMessage = 'Starting local sign-in server...';
@@ -1513,8 +1658,8 @@ class AppState extends State<AgroutApp> {
        borderColor = const Color(0xFF8BD4BA); // soft green
        titleColor = const Color(0xFF8BD4BA);
        urlColor = const Color(0xFF8BD4BA);
-       copyColor = Colors.grey;
-       escColor = const Color(0xFF8BD4BA);     // focus Esc - done
+copyColor = Colors.grey;
+        escColor = const Color(0xFFFF6B6B);     // Esc (close) is always red
        msgColor = const Color(0xFF8BD4BA);
        urlText = 'done';
      } else if (_loginState == _LoginState.failed) {
@@ -1522,7 +1667,7 @@ class AppState extends State<AgroutApp> {
        titleColor = const Color(0xFFFF8A8A);
        urlColor = const Color(0xFFFF8A8A);
        copyColor = const Color(0xFFFFB347);              // warm amber - retry action pops
-       escColor = Colors.grey;
+       escColor = const Color(0xFFFF6B6B);
        msgColor = const Color(0xFFFF8A8A);
        urlText = _loginUrl ?? '(unavailable)';
      } else if (_loginState == _LoginState.loading) {
@@ -1530,7 +1675,7 @@ class AppState extends State<AgroutApp> {
        titleColor = Colors.cyan;
        urlColor = Colors.grey;
        copyColor = Colors.grey;
-       escColor = Colors.grey;
+       escColor = const Color(0xFFFF6B6B);
        msgColor = Colors.cyan;
        urlText = 'Starting server...';
      } else {
@@ -1539,7 +1684,7 @@ class AppState extends State<AgroutApp> {
        titleColor = const Color(0xFFD19A66);
        urlColor = const Color(0xFFD19A66);
        copyColor = const Color(0xFFD19A66);  // primary action matches border
-       escColor = Colors.grey;
+       escColor = const Color(0xFFFF6B6B);
        msgColor = Colors.grey;
        urlText = _loginUrl ?? '(unavailable)';
      }

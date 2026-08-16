@@ -41,6 +41,7 @@ log is a sidebar, fullscreen log when toggled.
 | `o` | Copy OpenAI endpoint URL to clipboard |
 | `a` | Copy Anthropic endpoint URL to clipboard |
 | `p` | Port configuration panel |
+| `t` | Port config | Test the new port (enables `[Enter]` save) |
 | `l` | Local sign-in link panel (paste API key) |
 | `Shift+U` | Update the bridge (shown when a newer stable exists) |
 | `h` | Help panel |
@@ -78,10 +79,15 @@ confirm dialog to delete it (the active id is corrected if needed).
 
 `[p]` opens a centred panel with:
 
-- A text field for the new port (`Enter` saves, `Esc` returns).
-- Empty input resets to the default (`8318`).
-- The bridge scans each candidate port; if `8318` is busy, it
-  auto-increments to the next free port and reports the chosen value.
+- A text field for the new port. Empty input resets to the default
+  (`8318`).
+- The desired port must be tested before it can be saved:
+  `[t] test` probes it and shows `Testing port X...`, then green
+  "available" or red "in use, try another".
+- `[Enter] save` stays grey (disabled) until the test succeeds, then
+  persists the port. `[Esc] back` returns without saving.
+- The old auto-increment fallback (silently switching to the next free
+  port) was removed in favor of this explicit test flow.
 
 ## Login panel
 

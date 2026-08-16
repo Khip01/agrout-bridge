@@ -302,10 +302,12 @@ or route Claude traffic directly via a non-AgentRouter provider.
 
 Default port: `8318` (continuity with the upstream agentrouter-spoof-proxy).
 Config persisted at `~/.config/agrout-bridge/config.json`. Port can be changed
-via `[p]` panel in the TUI (with availability scan + auto-increment fallback).
-Empty input = reset to default. If the configured port is occupied at startup,
-the bridge binds the next free port for that run without persisting it; the
-actual bound port is visible via `/info` (`serverPort`) and `/health`.
+via `[p]` panel in the TUI: type the new port, `[t] test` probes it (green
+available / red in use), and `[Enter] save` persists it only after a
+successful test. Empty input = reset to default. If the configured port is
+occupied at startup, the bridge binds the next free port for that run without
+persisting it; the actual bound port is visible via `/info` (`serverPort`)
+and `/health`.
 
 ## TUI pages
 
@@ -363,6 +365,7 @@ with `package.json` when bumping a release.
 | `o` | Main | Copy OpenAI endpoint URL to clipboard |
 | `a` | Main | Copy Anthropic endpoint URL to clipboard |
 | `p` | Main | Port configuration panel |
+| `t` | Port config | Test the new port before saving (`[Enter]` save disabled until it succeeds) |
 | `l` | Main | Login panel (paste API key) |
 | `Shift+U` | Main | Update the bridge (shown only when a newer stable exists) |
 | `h` | Main | Help panel |
