@@ -182,10 +182,14 @@ class ServerController {
 
   static String _fmtNow() => DateTime.now().toIso8601String();
 
-  // Log a request line: [ts] PATH METHOD (bytes) or [ts] PATH METHOD (stream)
-  void _logRequest(String path, String method, {int bytes = 0, bool stream = false}) {
-    final size = stream ? 'stream' : '$bytes bytes';
-    LogStore.info('[${_fmtNow()}] $method $path ($size)');
+  /// Compact duration label, e.g. `1.234s`, `567ms`.
+  static String _formatDuration(Duration d) =>
+      d.inMilliseconds >= 1000 ? '${(d.inMilliseconds / 1000).toStringAsFixed(3)}s' : '${d.inMilliseconds}ms';
+
+  // Log a request line: [ts] GET/POST PATH (bytes) for open endpoints.
+  // Proxy POST endpoints are logged richer in onOutcome.
+  void _logRequest(String path, String method, {int bytes = 0}) {
+    LogStore.info('[${_fmtNow()}] $method $path ($bytes bytes)');
   }
 
   static int _contentLength(HttpResponse resp) {
@@ -227,11 +231,11 @@ class ServerController {
     // top-level await would block the server from accepting new connections
     // while a slow upstream is in flight.
     if (method == 'POST' && (path == '/v1/messages' || path == '/messages')) {
-      unawaited(_proxyAnthropic(req).then((_) => _logRequest(path, method, stream: true)));
+      unawaited(_proxyAnthropic(req));
       return;
     }
     if (method == 'POST' && path == '/v1/chat/completions') {
-      unawaited(_proxyOpenAi(req).then((_) => _logRequest(path, method, stream: true)));
+      unawaited(_proxyOpenAi(req));
       return;
     }
 
@@ -376,9 +380,16 @@ class ServerController {
         },
         onOutcome: (o) {
           UsageStore().record(o);
+          // Rich per-request log line:
+          //   [ts] PROXY <code> (<bytes/stream>) model=<m> in=<i> out=<o> <dur>ms
+          final fmt = o.streaming ? 'stream' : '${o.inputTokens + o.outputTokens} tokens';
+          final model = o.model?.isNotEmpty == true ? o.model : '-';
+          LogStore.info('[${_fmtNow()}] PROXY ${o.statusCode} ($fmt) model=$model in=${o.inputTokens} out=${o.outputTokens} ${_formatDuration(o.duration)}');
         },
         onLog: (msg) {
-          LogStore.info(msg);
+          // Upstream/SSE diagnostics already formatted by the pump; just prefix
+          // with a timestamp and route through LogStore so the TUI sees them.
+          LogStore.info('[${_fmtNow()}] $msg');
         },
         trimSystemPrompt: configStore.config.trimSystemPrompt,
       );

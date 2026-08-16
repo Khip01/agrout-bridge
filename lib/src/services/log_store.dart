@@ -104,4 +104,12 @@ class LogStore {
     _rewrite();
     _version++;
   }
+
+  /// Number of entries older than 00:00 local time today. Used by the TUI to
+  /// decide whether the "clear old entries" action has anything to do.
+  static int countBeforeToday() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    return _entries.where((e) => e.timestamp.isBefore(today)).length;
+  }
 }

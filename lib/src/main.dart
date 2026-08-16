@@ -86,11 +86,17 @@ Future<void> _runCommand(List<String> args) async {
   _loadStores(profiles, config);
 
   final isServer = args.contains('--server');
+  // Initialise the JSONL activity log before the server starts so headless
+  // mode records requests too. TUI mode re-inits in `AppState.initState`,
+  // which is idempotent (reloads the same file).
+  LogStore.init();
   final controller = ServerController(profiles: profiles, configStore: config);
   final boundPort = await controller.start();
   await controller.refreshModels();
 
   if (isServer) {
+    LogStore.info('agrout-bridge headless started on '
+        '${config.config.listenAddress}:$boundPort');
     stdout.writeln('agrout-bridge running headless on http://${config.config.listenAddress}:$boundPort');
     stdout.writeln('Press Ctrl+C to stop.');
     final completer = Completer<void>();

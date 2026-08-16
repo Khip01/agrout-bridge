@@ -2,20 +2,58 @@
 
 ## v0.1.15 (2026-08-16)
 
+### Fix
+
+- **Headless mode never wrote the activity log.** `LogStore.init()` was only
+  called from the TUI's `initState`, so `agrout-bridge run --server` produced
+  no `logs.jsonl` entries at all (every append silently no-op'd because the
+  path was null). `main.dart` now initialises the log store before the server
+  starts, and records a headless start line.
+
 ### Improve
 
-- **Login dialog is a state-machine with color-coded feedback.** The sign-in
-  dialog now tracks an explicit state: idle / loading / success / failed.
-  - Idle: URL is bright green and `[c] copy URL` is the focused primary action.
+- **Per-request log lines now carry model and token usage.** Instead of a bare
+  `PROXY 200 (stream)`, each completed request logs
+  `PROXY <code> (<n> tokens|stream) model=<id> in=<n> out=<n> <duration>`,
+  sourced from the existing `ProxyOutcome`. Open endpoints (`/health`,
+  `/v1/models`, `/info`, `/v1/token`) log a single `GET <path> (<n> bytes)`
+  line, and the duplicated timestamp prefix was removed.
+- **Log panel date dividers are now explicit.** Separators read
+  `Today - Sunday, 16 Aug 26`, `Yesterday - Saturday, 15 Aug 26`, or
+  `Friday, 14 Aug 26` instead of a bare three-letter weekday.
+- **Clear-log actions ask for confirmation.** `[Shift+C]` (all) and
+  `[Shift+O]` (before today) now show a `[Y]es / [N]o` prompt inline in the log
+  panel plus the status bar, count the affected entries up front, and no-op
+  with a message when there is nothing to clear. Adapted from
+  `commandcode-bridge`. `LogStore.countBeforeToday()` was added to support it.
+- **Models page adopts the commandcode-bridge picker UX.** The list is grouped
+  by model family (Anthropic / OpenAI / Google / xAI / Other), the highlighted
+  row uses a `▸` chevron in bold cyan, models with recent upstream failures
+  are flagged in yellow, and a header line shows the model count plus the
+  available keys. `[up]`/`[down]` move the highlight, `[Enter]` copies the id,
+  and `[PgUp]`/`[PgDn]` scroll scoped to the Models page only.
+- **Status bar no longer duplicates "Idle".** The left slot is a single
+  indicator: `Proxy stopped` (red), `Streaming (N)` (yellow) when requests are
+  in flight, a transient status message, or `Proxy ready` (green). The refresh
+  indicator on the right reports time since the last model refresh
+  (`Refreshing` / `Idle` / `Xs ago`) instead of re-deriving uptime.
+- **Footer keymap is colour-coded by category.** Navigation keys are cyan,
+  actions (`[r]`, `[o]`/`[a]`) soft green, configuration (`[p]`, `[l]`) amber,
+  and meta keys grey.
+- **Header shows the version** as `agrout-bridge vX.Y.Z` (no stray spacing).
+- **Login dialog is a width-bounded state machine with calm colour coding.**
+  The panel no longer stretches across the full terminal width, and it tracks
+  an explicit state instead of a single boolean:
+  - Idle: amber URL, `[c] copy URL` is the focused action.
   - Loading: cyan "Starting server..." while the local server boots.
-  - Success: bright-green confirmation message, Escape is the focused action.
-  - Failed: red message + reason shown inline, `[c] copy URL` stays bright so
-    the user can retry.
-- **Version badge in TUI header.** The header now reads
-  `agrout-bridge v. X.Y.Z`. The version is resolved at compile time from the
-  `PACKAGE_VERSION` dart-define (fallback hard-coded in `version.dart`); the
-  `build` / `build.bat` scripts read `package.json` version and pass it in, so
-  binary `--version` always matches the npm tarball release.
+  - Success: soft-green confirmation, `[Esc]` becomes the focused action.
+  - Failed: warm-red message with the reason inline, `[c] copy URL` stays lit
+    so the user can retry.
+  Colours are muted pastels rather than saturated neon.
+- **Version is resolved dynamically.** `bridgeVersion` now reads the
+  `PACKAGE_VERSION` dart-define (with a hard-coded fallback in `version.dart`),
+  and `build` / `build.bat` pass `package.json`'s version through, so the
+  binary's `--version` and the TUI header always match the released tarball.
 - **OAuth buttons open in a new browser tab.** `<a ... target="_blank">` so the
   user stays on the `http://127.0.0.1/.../login` page to paste their API key in
   the form below.

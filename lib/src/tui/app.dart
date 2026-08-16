@@ -29,6 +29,9 @@ enum _Panel { main, help, quit, login, portConfig }
 
 enum _InfoPage { profile, usage, models, proxy }
 
+/// Which clear action is awaiting Y/N confirmation in the log panel.
+enum _ClearScope { none, all, beforeToday }
+
 /// Login-screen lifecycle used to color-code the sign-in dialog.
 /// Mirrors a tiny state machine:
 ///   idle   → waiting for the user to paste/confirm a key (URL is bright,
@@ -46,6 +49,7 @@ class AppState extends State<AgroutApp> {
   _InfoPage _infoPage = _InfoPage.profile;
   bool _showLog = false;
   bool _logFullscreen = false;
+  _ClearScope _confirmClear = _ClearScope.none;
   String _status = '';
   Timer? _statusTimer;
   Timer? _pageRefreshTimer;
@@ -253,13 +257,73 @@ class AppState extends State<AgroutApp> {
     if (e.logicalKey == LogicalKey.keyH) { _panel = _Panel.help; _pageRefreshTimer?.cancel(); setState(() {}); return true; }
     if (e.logicalKey == LogicalKey.keyQ) { _panel = _Panel.quit; _pageRefreshTimer?.cancel(); setState(() {}); return true; }
     if (_showLog) {
+      // Pending clear confirmation takes priority over every other log key.
+      if (_confirmClear != _ClearScope.none) {
+        if (e.logicalKey == LogicalKey.keyY || e.logicalKey == LogicalKey.enter) {
+          _doConfirmClear();
+          return true;
+        }
+        if (e.logicalKey == LogicalKey.keyN || e.logicalKey == LogicalKey.escape) {
+          _cancelConfirmClear();
+          return true;
+        }
+        return false;
+      }
       if (e.logicalKey == LogicalKey.keyF) { _logFullscreen = !_logFullscreen; setState(() {}); return true; }
-      if (e.logicalKey == LogicalKey.keyC && e.isShiftPressed) { LogStore.clear(); _lastLogVersion = LogStore.version; _setStatus('Cleared all log entries', duration: 3); setState(() {}); return true; }
-      if (e.logicalKey == LogicalKey.keyO && e.isShiftPressed) { LogStore.clearBeforeToday(); _lastLogVersion = LogStore.version; _setStatus('Cleared entries before today', duration: 3); setState(() {}); return true; }
+      if (e.logicalKey == LogicalKey.keyC && e.isShiftPressed) {
+        if (LogStore.entries.isEmpty) {
+          _setStatus('Log is already empty', duration: 3);
+          return true;
+        }
+        _confirmClear = _ClearScope.all;
+        _setStatus('Clear ALL ${LogStore.entries.length} log entries? [Y]es [N]o', duration: 0);
+        setState(() {});
+        return true;
+      }
+      if (e.logicalKey == LogicalKey.keyO && e.isShiftPressed) {
+        final n = LogStore.countBeforeToday();
+        if (n == 0) {
+          _setStatus('No entries older than today', duration: 3);
+          return true;
+        }
+        _confirmClear = _ClearScope.beforeToday;
+        _setStatus('Clear $n entries before today? [Y]es [N]o', duration: 0);
+        setState(() {});
+        return true;
+      }
     }
     if (_infoPage == _InfoPage.models && e.logicalKey == LogicalKey.enter) {
       _copySelectedModel();
       return true;
+    }
+
+    // Model list navigation — only on the Models page. Mirrors
+    // commandcode-bridge: up/down moves the highlight, Enter copies the id.
+    if (_infoPage == _InfoPage.models) {
+      final models = _proxy.modelIds;
+      if (models.isNotEmpty) {
+        if (e.logicalKey == LogicalKey.arrowUp && _selectedModelIndex > 0) {
+          _selectedModelIndex--;
+          _scrollToModel();
+          setState(() {});
+          return true;
+        }
+        if (e.logicalKey == LogicalKey.arrowDown &&
+            _selectedModelIndex < models.length - 1) {
+          _selectedModelIndex++;
+          _scrollToModel();
+          setState(() {});
+          return true;
+        }
+        if (e.logicalKey == LogicalKey.pageUp) {
+          _scrollUp(10);
+          return true;
+        }
+        if (e.logicalKey == LogicalKey.pageDown) {
+          _scrollDown(10);
+          return true;
+        }
+      }
     }
     return false;
   }
@@ -281,6 +345,21 @@ class AppState extends State<AgroutApp> {
     _selectedModelIndex = 0;
     _infoScrollCtrl.jumpTo(0);
     setState(() {});
+  }
+
+  void _scrollUp(int lines) {
+    final newOffset = (_infoScrollCtrl.offset - lines * 1.0).clamp(0.0, double.infinity);
+    _infoScrollCtrl.jumpTo(newOffset);
+  }
+
+  void _scrollDown(int lines) {
+    _infoScrollCtrl.jumpTo(_infoScrollCtrl.offset + lines);
+  }
+
+  void _scrollToModel() {
+    // Approximate: each model row renders on one line; offset by the header.
+    final offset = (_selectedModelIndex * 1.0).clamp(0.0, double.infinity);
+    _infoScrollCtrl.jumpTo(offset);
   }
 
   void _doRefresh() async {
@@ -354,7 +433,7 @@ class AppState extends State<AgroutApp> {
       padding: const EdgeInsets.symmetric(horizontal: 1),
       child: Row(
         children: [
-          Text(' agrout-bridge v. $bridgeVersion', style: const TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold)),
+          Text(' agrout-bridge v$bridgeVersion', style: TextStyle(color: Colors.cyan)),
           const Spacer(),
           Text(_activeProfileLabel(), style: const TextStyle(color: Colors.grey)),
           Text('  [${_pageTab(_infoPage)}] ', style: const TextStyle(color: Colors.yellow, fontWeight: FontWeight.bold)),
@@ -504,24 +583,86 @@ class AppState extends State<AgroutApp> {
     ];
   }
 
-  List<Component> _modelHeaderRows() => [_section('Models (live /v1/models)')];
+  List<Component> _modelHeaderRows() {
+    final n = _proxy.modelIds.length;
+    return [
+      _section('Models (live /v1/models)'),
+      Padding(
+        padding: const EdgeInsets.only(left: 1),
+        child: Text(
+          n == 0
+              ? 'No models cached. Press [r] to fetch from agentrouter.org.'
+              : '$n model(s) available on this profile. [up/down] select, [Enter] copy id.',
+          style: const TextStyle(color: Colors.grey),
+        ),
+      ),
+      const SizedBox(height: 1),
+    ];
+  }
 
   List<Component> _buildModelRows() {
     final s = _proxy.status();
     if (s.modelCount == 0) {
-      return [Padding(padding: const EdgeInsets.all(2), child: Text('No models yet — press [r] to fetch', style: TextStyle(color: Colors.grey)))];
+      return [
+        Padding(
+          padding: const EdgeInsets.all(2),
+          child: Text('No models yet — press [r] to fetch',
+              style: TextStyle(color: Colors.grey)),
+        ),
+      ];
     }
     final m = _proxy.modelIds;
     if (m.isEmpty) return const [];
-    return m.asMap().entries.map((entry) {
-      final i = entry.key;
-      final id = entry.value;
+
+    final rows = <Component>[];
+    final health = (s.modelHealth['failures'] as Map?) ?? const {};
+    String? group;
+
+    for (var i = 0; i < m.length; i++) {
+      final id = m[i];
       final selected = i == _selectedModelIndex;
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 0),
-        child: Text('${selected ? '>' : ' '} $id', style: TextStyle(color: selected ? Colors.cyan : Colors.grey)),
-      );
-    }).toList();
+      final curGroup = _modelFamily(id);
+
+      // Group header per model family (anthropic / openai / other), mirroring
+      // commandcode-bridge's provider grouping.
+      if (curGroup != group) {
+        group = curGroup;
+        if (rows.isNotEmpty) rows.add(const SizedBox(height: 1));
+        rows.add(Padding(
+          padding: const EdgeInsets.only(left: 2),
+          child: Text(curGroup,
+              style: const TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold)),
+        ));
+      }
+
+      final fails = health[id];
+      final degraded = fails is int && fails > 0;
+      final prefix = selected ? '▸ ' : '  ';
+      final suffix = degraded ? '  [$fails recent failure(s)]' : '';
+      rows.add(Padding(
+        padding: const EdgeInsets.only(left: 4),
+        child: Text('$prefix$id$suffix',
+            style: TextStyle(
+              color: selected
+                  ? Colors.cyan
+                  : degraded
+                      ? Colors.yellow
+                      : Colors.grey,
+              fontWeight: selected ? FontWeight.bold : null,
+            )),
+      ));
+    }
+    return rows;
+  }
+
+  /// Coarse family label used to group the live model list.
+  String _modelFamily(String id) {
+    final lower = id.toLowerCase();
+    if (lower.contains('claude')) return 'Anthropic';
+    if (lower.startsWith('gpt') || lower.contains('openai')) return 'OpenAI';
+    if (lower.contains('gemini')) return 'Google';
+    if (lower.contains('grok')) return 'xAI';
+    return 'Other';
   }
 
   List<Component> _proxyRows() {
@@ -579,54 +720,125 @@ class AppState extends State<AgroutApp> {
     final sec = uptime.inSeconds.remainder(60);
     final upStr = '${h}h ${m}m ${sec}s';
     final streams = s.activeStreams;
+
+    // Left indicator: single source of truth, no duplicated text.
+    //   - Stopped    -> red
+    //   - Idle       -> grey "Proxy ready" (or transient status message)
+    //   - Streaming  -> green/yellow "Streaming N" (replaces "Proxy ready")
+    String leftText;
+    Color leftColor;
+    if (!s.running) {
+      leftText = 'Proxy stopped';
+      leftColor = Colors.red;
+    } else if (streams > 0) {
+      leftText = 'Streaming ($streams)';
+      leftColor = Colors.yellow;
+    } else if (_status.isNotEmpty) {
+      leftText = _status;
+      leftColor = _notifColor();
+    } else {
+      leftText = 'Proxy ready';
+      leftColor = Colors.green;
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 1),
       child: Row(children: [
-        Text(' ${_status.isEmpty ? "Idle" : _status}',
-            style: TextStyle(color: _status.isEmpty ? Colors.grey : _notifColor())),
+        Text(' $leftText', style: TextStyle(color: leftColor)),
         const Spacer(),
-        if (streams > 0)
-          Text(' streams:$streams', style: const TextStyle(color: Colors.yellow)),
         Text('  uptime: $upStr', style: const TextStyle(color: Colors.grey)),
-        Text('  ${_refreshLabel()}', style: const TextStyle(color: Colors.grey)),
+        Text('  ${_refreshLabel()}', style: TextStyle(color: _proxyLoadingColor())),
       ]),
     );
   }
 
+  /// Color for the refresh/idle indicator: cyan when idle, yellow while
+  /// refreshing from the upstream.
+  Color _proxyLoadingColor() => _loadingModels ? Colors.yellow : Colors.grey;
+
   String _refreshLabel() {
-    final secs = DateTime.now().difference(_proxy.status().startedAt).inSeconds;
-    final last = _lastRefreshAt == null ? 'Idle' : '${secs}s ago';
     if (_loadingModels) return 'Refreshing…';
-    return last;
+    if (_lastRefreshAt == null) return 'Idle';
+    final secs = DateTime.now().difference(_lastRefreshAt!).inSeconds;
+    return '${secs}s ago';
   }
 
   // ── Footer ────────────────────────────────────────────────────────
   Component _buildFooter() {
-    final s = _proxy.status();
-    final hasStreams = s.activeStreams > 0;
-    final hint = _panel == _Panel.main
-        ? '[1-4] page | [r] refresh | [o]/[a] copy endpoint | [p] port | [l] login | [h] help | [q] quit | [Ctrl+L] log${hasStreams ? "  (streams:${s.activeStreams})" : ""}'
-        : (_panel == _Panel.login ? '[c] copy URL | [Esc] close' : '[Esc] back');
+    final base = TextStyle(color: Colors.grey);
+    final navStyle = TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold);
+    final actionStyle = TextStyle(color: const Color(0xFF8BD4BA), fontWeight: FontWeight.bold); // soft green
+    final cfgStyle = TextStyle(color: const Color(0xFFD19A66)); // amber
+    if (_panel != _Panel.main) {
+      final hint = _panel == _Panel.login
+          ? '[c] copy URL | [Esc] close'
+          : '[Esc] back';
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 1),
+        child: Text(' $hint', style: base),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 1),
-      child: Text(' $hint',
-          style: TextStyle(color: hasStreams ? Colors.yellow : Colors.grey)),
+      child: Row(children: [
+        Text('[1-4] ', style: navStyle),
+        Text('page  ', style: base),
+        Text('[r] ', style: actionStyle),
+        Text('refresh  ', style: base),
+        Text('[o]/[a] ', style: actionStyle),
+        Text('copy endpoint  ', style: base),
+        Text('[p] ', style: cfgStyle),
+        Text('port  ', style: base),
+        Text('[l] ', style: cfgStyle),
+        Text('login  ', style: base),
+        Text('[h] ', style: base),
+        Text('help  ', style: base),
+        Text('[q] ', style: base),
+        Text('quit  ', style: base),
+        Text('[Ctrl+L] ', style: base),
+        Text('log', style: base),
+      ]),
     );
   }
 
   // ── Log side panel ────────────────────────────────────────────────
+  void _doConfirmClear() {
+    switch (_confirmClear) {
+      case _ClearScope.beforeToday:
+        final n = LogStore.countBeforeToday();
+        LogStore.clearBeforeToday();
+        _setStatus('Cleared $n entries before today', duration: 3);
+        break;
+      case _ClearScope.all:
+        LogStore.clear();
+        _setStatus('Cleared all log entries', duration: 3);
+        break;
+      case _ClearScope.none:
+        break;
+    }
+    _confirmClear = _ClearScope.none;
+    LogStore.info('Log cleared by user');
+    _lastLogVersion = LogStore.version;
+    setState(() {});
+  }
+
+  void _cancelConfirmClear() {
+    _confirmClear = _ClearScope.none;
+    _setStatus('Clear cancelled', duration: 2);
+    setState(() {});
+  }
+
   Component _logPanel({required bool fullscreen}) {
     final entries = LogStore.latestFirst.take(200).toList();
     _lastLogVersion = LogStore.version;
     final listChildren = <Component>[];
     String? lastDate;
-    const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     for (final entry in entries) {
       final ds = '${entry.timestamp.year}-${entry.timestamp.month.toString().padLeft(2, '0')}-${entry.timestamp.day.toString().padLeft(2, '0')}';
       if (ds != lastDate) {
         lastDate = ds;
-        final dn = dayNames[(entry.timestamp.weekday - 1).clamp(0, 6)];
-        listChildren.add(Text('${"─" * 12} $dn ${"─" * 12}', style: const TextStyle(color: Colors.grey)));
+        final label = _dayDividerLabel(entry.timestamp);
+        listChildren.add(Text('${"─" * 4} $label ${"─" * 4}', style: const TextStyle(color: Colors.grey)));
       }
       final t = '${entry.timestamp.hour.toString().padLeft(2, '0')}:${entry.timestamp.minute.toString().padLeft(2, '0')}:${entry.timestamp.second.toString().padLeft(2, '0')}';
       listChildren.add(Row(children: [
@@ -640,8 +852,20 @@ class AppState extends State<AgroutApp> {
         Text(fullscreen ? ' LOG (fullscreen)' : ' LOG', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.cyan)),
         const Spacer(),
         if (!fullscreen) const Text('[f]ull ', style: TextStyle(color: Colors.grey)),
+        const Text('[C]lear ', style: TextStyle(color: Colors.grey)),
+        const Text('[O]ld ', style: TextStyle(color: Colors.grey)),
       ]),
       Container(height: 1, color: Colors.grey),
+      if (_confirmClear != _ClearScope.none)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 0),
+          child: Text(
+            _confirmClear == _ClearScope.all
+                ? ' Clear ALL entries? [Y]es  [N]o'
+                : ' Clear entries before today? [Y]es  [N]o',
+            style: const TextStyle(color: Color(0xFFFFB347), fontWeight: FontWeight.bold),
+          ),
+        ),
       Expanded(
         child: Scrollbar(
           controller: _logScrollCtrl,
@@ -652,6 +876,32 @@ class AppState extends State<AgroutApp> {
         ),
       ),
     ]);
+  }
+
+  /// Full-date divider label for the log panel:
+  ///   "Today - Sunday, 16 Aug 26"
+  ///   "Yesterday - Saturday, 15 Aug 26"
+  ///   "Friday, 14 Aug 26"
+  String _dayDividerLabel(DateTime ts) {
+    const dayNames = [
+      'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
+    ];
+    const monthNames = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    final dn = dayNames[(ts.weekday - 1).clamp(0, 6)];
+    final mn = monthNames[(ts.month - 1).clamp(0, 11)];
+    final yy = (ts.year % 100).toString().padLeft(2, '0');
+    final stamp = '$dn, ${ts.day} $mn $yy';
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final entryDay = DateTime(ts.year, ts.month, ts.day);
+    final diff = today.difference(entryDay).inDays;
+    if (diff == 0) return 'Today - $stamp';
+    if (diff == 1) return 'Yesterday - $stamp';
+    return stamp;
   }
 
   String _logLevel(LogLevel l) {
@@ -696,13 +946,17 @@ class AppState extends State<AgroutApp> {
     add('  [r]       Refresh models + WAF');
     add('  [o]       Copy OpenAI endpoint URL');
     add('  [a]       Copy Anthropic endpoint URL');
-    add('  [Enter]   Copy selected model id (Models page)');
+    add('');
+    add('Models page ([3]) only:', Colors.cyan);
+    add('  [up/down] Move the model highlight');
+    add('  [Enter]   Copy the highlighted model id');
+    add('  [PgUp/PgDn] Scroll the list by 10 lines');
     add('');
     add('Log controls:', Colors.cyan);
     add('  [Ctrl+L]  Toggle log side panel');
     add('  [f]       Toggle log fullscreen / sidebar');
-    add('  [Shift+C] Clear all log entries');
-    add('  [Shift+O] Clear entries before today');
+    add('  [Shift+C] Clear all log entries (asks Y/N)');
+    add('  [Shift+O] Clear entries before today (asks Y/N)');
     add('');
     add('Other:', Colors.cyan);
     add('  [p]  Port configuration panel');
@@ -883,74 +1137,83 @@ class AppState extends State<AgroutApp> {
   }
 
    Component _loginPanel() {
-     // Color palette driven by the sign-in state-machine:
-     //   idle    → URL/primary action is bright green (the URL is valid and
-     //            ready to copy), Copy URL key hint bright, Esc grey.
-     //   success → success message is bright green, focus Esc (user is done).
-     //   failed   → everything error-bright red, reason shown, Copy URL stays
-     //            bright so the user can retry/copy a different key.
-     //   loading  → "Starting..." in cyan, no key hints highlighted.
+     // Professional color palette driven by the sign-in state-machine.
+     // Uses muted pastels instead of neon - avoids eye strain, stays legible.
+     //   idle    -> warm amber (URL is ready, ready-to-action)
+     //   success -> soft green (positive, not jarring)
+     //   failed  -> warm red (clear error, not screaming)
+     //   loading -> soft cyan (neutral activity)
      Color urlColor;
+     Color borderColor;
+     Color titleColor;
      Color copyColor;   // color of [c] copy URL hint (primary action)
-     Color escColor;    // color of [Esc] hint (secondary / success-focused)
+     Color escColor;    // color of [Esc] hint
      Color msgColor;
      String urlText;
      if (_loginState == _LoginState.success) {
-       urlColor = Colors.green;
+       borderColor = const Color(0xFF8BD4BA); // soft green
+       titleColor = const Color(0xFF8BD4BA);
+       urlColor = const Color(0xFF8BD4BA);
        copyColor = Colors.grey;
-       escColor = const Color(0xFF50FA7B); // bright green - focus Esc
-       msgColor = Colors.green;
+       escColor = const Color(0xFF8BD4BA);     // focus Esc - done
+       msgColor = const Color(0xFF8BD4BA);
        urlText = 'done';
      } else if (_loginState == _LoginState.failed) {
-       urlColor = Colors.red;
-       copyColor = const Color(0xFFFF5555);
+       borderColor = const Color(0xFFFF8A8A); // warm red (pastel)
+       titleColor = const Color(0xFFFF8A8A);
+       urlColor = const Color(0xFFFF8A8A);
+       copyColor = const Color(0xFFFFB347);              // warm amber - retry action pops
        escColor = Colors.grey;
-       msgColor = Colors.red;
+       msgColor = const Color(0xFFFF8A8A);
        urlText = _loginUrl ?? '(unavailable)';
      } else if (_loginState == _LoginState.loading) {
-       urlColor = Colors.cyan;
+       borderColor = Colors.grey;
+       titleColor = Colors.cyan;
+       urlColor = Colors.grey;
        copyColor = Colors.grey;
        escColor = Colors.grey;
        msgColor = Colors.cyan;
        urlText = 'Starting server...';
      } else {
        // idle
-       urlColor = const Color(0xFF50FA7B); // bright green - URL is valid
-       copyColor = Colors.green;
+       borderColor = const Color(0xFFD19A66); // warm amber
+       titleColor = const Color(0xFFD19A66);
+       urlColor = const Color(0xFFD19A66);
+       copyColor = const Color(0xFFD19A66);  // primary action matches border
        escColor = Colors.grey;
        msgColor = Colors.grey;
        urlText = _loginUrl ?? '(unavailable)';
      }
-     return Center(child: Container(
-       padding: const EdgeInsets.all(3),
-       decoration: BoxDecoration(border: BoxBorder.all(color: urlColor)),
-       child: Column(mainAxisSize: MainAxisSize.min, children: [
-         Text('Sign in to AgentRouter', style: TextStyle(color: urlColor, fontWeight: FontWeight.bold)),
-         const SizedBox(height: 1),
-         Text(' Local sign-in link ', style: TextStyle(color: urlColor)),
-         const SizedBox(height: 1),
-         if (_loginState == _LoginState.loading)
-           Text('Starting server...', style: TextStyle(color: Colors.cyan))
-         else
-           Text(urlText, style: TextStyle(color: urlColor)),
-         const SizedBox(height: 1),
-         Text(_loginMessage ?? '', style: TextStyle(color: msgColor)),
-         if (_loginState == _LoginState.failed && _loginError != null)
-           Padding(
-             padding: const EdgeInsets.only(top: 1),
-             child: Text('Reason: ${_loginError}', style: TextStyle(color: Colors.red, fontStyle: FontStyle.italic)),
-           ),
-          const SizedBox(height: 1),
-          Row(children: [
-            Text('[c] copy URL  ', style: TextStyle(color: copyColor)),
-            Text('[Esc] close', style: TextStyle(color: escColor)),
-          ]),
-        ]),
-      ));
-    }
-  }
+      return Center(child: SizedBox(
+        width: 72, // wrap-content-ish: fits the longest line (URL/message)
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 4),
+          decoration: BoxDecoration(border: BoxBorder.all(color: borderColor)),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Sign in to AgentRouter', style: TextStyle(color: titleColor, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 1),
+            Text(' Local sign-in link ', style: TextStyle(color: borderColor)),
+            const SizedBox(height: 1),
+            if (_loginState == _LoginState.loading)
+              Text('Starting server...', style: TextStyle(color: Colors.cyan))
+            else
+             Text(urlText, style: TextStyle(color: urlColor)),
+           const SizedBox(height: 1),
+           Text(_loginMessage ?? '', style: TextStyle(color: msgColor)),
+           if (_loginState == _LoginState.failed && _loginError != null)
+             Padding(
+               padding: const EdgeInsets.only(top: 1),
+               child: Text('Reason: ${_loginError}', style: TextStyle(color: const Color(0xFFFF8A8A), fontStyle: FontStyle.italic)),
+             ),
+           const SizedBox(height: 1),
+           Row(children: [
+             Text('[c] copy URL  ', style: TextStyle(color: copyColor)),
+             Text('[Esc] close', style: TextStyle(color: escColor)),
+           ]),
+         ]),
+       ),
+     ));
+   }
+ }
 
 
-extension on ServerStatus {
-  // no-op extension to keep imports tidy if the type ever needs helpers.
-}

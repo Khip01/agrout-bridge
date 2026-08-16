@@ -306,6 +306,44 @@ actual bound port is visible via `/info` (`serverPort`) and `/health`.
 | `3` | Models | Live model list + per-model health |
 | `4` | Proxy Config | Port, endpoints, uptime, circuit, active streams |
 
+The Models page mirrors the `commandcode-bridge` picker: rows are grouped by
+model family, the highlighted row is a bold cyan `▸` chevron, models with
+recent upstream failures are flagged yellow, and the navigation keys
+(`up`/`down`/`Enter`/`PgUp`/`PgDn`) are scoped to that page only.
+
+## Logging
+
+`LogStore` writes a JSONL activity log (max 2000 entries) to
+`~/.config/agrout-bridge/logs.jsonl`. It is initialised in `main.dart` before
+the server starts, so **headless mode logs too** (the TUI re-inits, which is
+idempotent).
+
+Per-request lines:
+
+```
+[ts] PROXY 200 (5073 tokens) model=gpt-5.6-sol in=5064 out=9 4.160s
+[ts] PROXY 200 (stream) model=claude-opus-5 in=14 out=50 1.204s
+[ts] GET /health (312 bytes)
+```
+
+Proxy requests are logged from the `onOutcome` callback (so model + token
+counts + duration come from `ProxyOutcome`); open endpoints are logged inline in
+`_handle`. The TUI log panel groups entries under full-date dividers
+(`Today - Sunday, 16 Aug 26` / `Yesterday - ...` / `Friday, 14 Aug 26`).
+
+The status bar's left slot is a single indicator: `Proxy stopped` (red),
+`Streaming (N)` (yellow), a transient status message, or `Proxy ready` (green).
+The right side shows uptime plus the time since the last model refresh.
+
+## Versioning
+
+`bridgeVersion` in `lib/src/models/version.dart` reads the `PACKAGE_VERSION`
+dart-define with a hard-coded fallback. `build` and `build.bat` read
+`package.json`'s `version` and pass it via
+`--dart-define=PACKAGE_VERSION=<v>`, so the compiled binary's `--version` and
+the TUI header always match the released tarball. Keep the fallback in sync
+with `package.json` when bumping a release.
+
 ## Key bindings
 
 | Key | Context | Action |
@@ -320,11 +358,14 @@ actual bound port is visible via `/info` (`serverPort`) and `/health`.
 | `q` | Main | Quit confirmation |
 | `up/down` | Main | Scroll / navigate |
 | `PgUp/PgDn` | Main | Scroll 10 lines |
+| `up/down` | Models page | Move the model highlight |
 | `Enter` | Models page | Copy selected model id |
+| `PgUp/PgDn` | Models page | Scroll the model list by 10 lines |
 | `Ctrl+L` | Main | Toggle log side panel |
 | `f` | Log open | Toggle log fullscreen / side panel |
-| `Shift+C` | Log open | Clear all log entries |
-| `Shift+O` | Log open | Clear entries before today |
+| `Shift+C` | Log open | Clear all log entries (Y/N confirmation) |
+| `Shift+O` | Log open | Clear entries before today (Y/N confirmation) |
+| `y` / `n` | Clear confirm | Confirm / cancel the pending clear |
 
 ## Changelog
 
