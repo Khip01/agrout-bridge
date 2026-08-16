@@ -1319,19 +1319,12 @@ class AppState extends State<AgroutApp> {
   }
 
   /// Confirm the update: cancel every app timer, stop the proxy with a
-  /// bounded timeout, then close only the TUI (not the process) via
-  /// [TerminalBinding.shutdown], which restores the terminal without calling
-  /// `exit()`. `runApp()` returns in `main.dart`, where the process exits
-  /// cleanly. No instruction is printed at exit: the user already copied the
-  /// `agrout-bridge update` command from the confirm dialog with `[c]`.
-  ///
-  /// [TerminalBinding.shutdown] leaves the alternate screen and clears it.
-  /// Any reactive timer still scheduled (the 1s refresh, the sign-in expiry)
-  /// would fire during the brief window before the event loop stops and repaint
-  /// the TUI directly onto the restored main buffer, leaving stray status-bar
-  /// text and a big blank gap. We cancel every app timer first so that cannot
-  /// happen. `_proxy.stop()` is also bounded so an active SSE stream can never
-  /// freeze the shutdown.
+  /// bounded timeout, then exit exactly like quit (`shutdownApp(0)`, which
+  /// restores the terminal and calls `exit()` immediately). No instruction is
+  /// printed at exit: the user already copied the `agrout-bridge update`
+  /// command from the confirm dialog with `[c]`. Timers are cancelled first so
+  /// no late frame repaints the restored main buffer, and `_proxy.stop()` is
+  /// bounded so an active SSE stream can never freeze the exit.
   Future<void> _doUpdate() async {
     _pageRefreshTimer?.cancel();
     _statusTimer?.cancel();
@@ -1342,7 +1335,10 @@ class AppState extends State<AgroutApp> {
       // Port release is best-effort; the process exits right after, and the
       // OS reaps the listener.
     }
-    TerminalBinding.instance.shutdown();
+    // Same clean exit as quit ([q] -> [y]): shutdownApp restores the
+    // terminal and calls exit() immediately, so the update dialog exits
+    // exactly like a normal quit, without leaving the screen "cleared".
+    shutdownApp(0);
   }
 
   Component _updateConfirmPanel() {

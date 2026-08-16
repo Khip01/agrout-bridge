@@ -4,6 +4,17 @@
 
 ### Fix
 
+- **TUI update dialog exits exactly like quit.** The update flow previously
+  used `TerminalBinding.instance.shutdown()`, which clears the alternate
+  screen and later exits, leaving the shell looking "cleared" compared to a
+  normal quit. `[Shift+U]` -> `[y]` now calls `shutdownApp(0)` exactly like
+  `[q]` -> `[y]`, so the terminal is restored the same way; the copied
+  `agrout-bridge update` command is left in the clipboard.
+- **Headless startup is instant.** `run --server` no longer waits for the
+  model refresh or the update check: the "running headless" banner prints
+  immediately after binding, and both refresh and the update check run in
+  the background. When a newer version exists, headless prints
+  `[UPDATE] Update available: vX -> vY` and records it in the activity log.
 - **TUI update closes only the TUI; the command is copied, not printed.
   Earlier attempts were broken twice.**
   - The first version did a plain `await _proxy.stop()`, which blocks while

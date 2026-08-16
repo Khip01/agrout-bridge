@@ -92,12 +92,10 @@ Future<void> _printUpdateNoticeIfAny() async {
     final cur = Updater.parseSemver(bridgeVersion);
     final nxt = latest == null ? null : Updater.parseSemver(latest);
     if (cur != null && nxt != null && Updater.compareSemver(nxt, cur) > 0) {
-      stdout.writeln();
-      stdout.writeln('Update available: v$bridgeVersion -> $latest');
-      stdout.writeln('To update, stop this bridge first, then run:');
-      stdout.writeln('  agrout-bridge update');
-      stdout.writeln();
-      LogStore.info('Update available: v$bridgeVersion -> $latest (stop bridge, then run `agrout-bridge update`)');
+      stdout.writeln('[UPDATE] Update available: v$bridgeVersion -> $latest');
+      stdout.writeln('[UPDATE] To update, stop this bridge first, then run: "agrout-bridge update"');
+      LogStore.info('[UPDATE] Update available: v$bridgeVersion -> $latest; '
+          'stop this bridge first, then run "agrout-bridge update"');
     }
   } catch (_) {
     // Best-effort; never fail startup on a network blip.
@@ -118,9 +116,10 @@ Future<void> _runCommand(List<String> args) async {
   final boundPort = await controller.start();
 
   if (isServer) {
-    // Headless: fetch the model list before the running banner, then show the
-    // update check in the background (never blocks the banner).
-    await controller.refreshModels();
+    // Headless: show the "running headless" banner immediately. The model
+    // refresh and update check run in the background so startup never stalls
+    // on an agentrouter round-trip.
+    unawaited(controller.refreshModels());
     unawaited(_printUpdateNoticeIfAny());
     LogStore.info('agrout-bridge headless started on '
         '${config.config.listenAddress}:$boundPort');
@@ -153,13 +152,10 @@ Future<void> _runCommand(List<String> args) async {
     proxyServer: controller,
   );
   await runApp(app);
-  // Normal quit path: the TUI calls `shutdownApp(0)` which asks nocterm to
-  // restore the terminal and exit the process; `runApp` does not return.
-  //
-  // Update path: the TUI uses `TerminalBinding.shutdown()` (no `exit()`), so
-  // `runApp` returns here with the process still alive. The user already
-  // copied the `agrout-bridge update` command from the dialog, so just exit
-  // cleanly.
+  // Both the normal quit path ([q] -> [y]) and the update path ([Shift+U]
+  // -> [y]) call `shutdownApp(0)`, which asks nocterm to restore the
+  // terminal and calls `exit()`; the process ends there and `runApp` does
+  // not return. If `runApp` ever does return, just exit cleanly.
   exit(0);
 }
 

@@ -131,10 +131,9 @@ When a newer stable version exists, the header shows an
 Pressing it opens a confirm dialog:
 
 - `[c]` copies the update command (`agrout-bridge update`) to the clipboard.
-- `[y]` closes the TUI (via nocterm's `TerminalBinding.shutdown()`, which
-  restores the terminal without exiting the process) and exits cleanly. No
-  instruction is printed afterwards: the command is already in your
-  clipboard.
+- `[y]` exits exactly like quit (nocterm's `shutdownApp(0)`), restoring the
+  terminal the same way as a normal `[q]` quit. The command is already in
+  your clipboard; nothing is printed afterwards.
 - `[n]` / `Esc` returns to the main panel.
 
 The bridge does not run the update itself. After the TUI exits, paste/run
