@@ -11,32 +11,28 @@ same proxy without a TUI for daemon / Docker usage.
 
 ## Auth
 
-The bridge identifies itself to AgentRouter with an API key (`sk-...`). Each
-profile stores one key plus an optional session token captured from a local
-sign-in flow. AgentRouter has no username/password registration, so the
-sign-in page opens provider OAuth (GitHub / LinuxDO) and accepts a pasted
-API key / session token; credentials login is not supported. The pasted
-value is validated against `/v1/models` (accepts dashboard API keys) and
-stored as the profile `apiKey`. The Profile page shows credit/usage fetched
-with the API key from the OpenAI-style billing endpoints
+The bridge identifies itself to AgentRouter with an API key (`sk-...` from
+the agentrouter.org dashboard). A profile is **API-key only**: AgentRouter
+sign-in is OAuth-only (GitHub / LinuxDO) and the bridge cannot capture the
+provider session cookie automatically, so session tokens and account-info
+enrichment were removed. A pasted key is validated against `/v1/models`
+before it is stored. The Profile page shows credit/usage fetched with the
+API key from the OpenAI-style billing endpoints
 (`/v1/dashboard/billing/subscription` and `/v1/dashboard/billing/usage`),
-so no session token is required to see quota or consumption. Provider OAuth
-runs in the browser; the session token is pasted back into the local page
-(the bridge cannot read the agentrouter session cookie, and GitHub rejects
-a `redirect_uri` that is not registered on the AgentRouter OAuth app).
+so no session token is required to see quota or consumption.
 
 ```
-agrout-bridge profile add <name>      # prompt for key
+agrout-bridge login             # headless: paste API key on the local page
+agrout-bridge profile add <name> [key]   # store a key directly
 agrout-bridge profile list
 agrout-bridge profile use <name>
 agrout-bridge profile remove <name>
-agrout-bridge profile login           # open local sign-in link, capture session token
-agrout-bridge profile logout
-agrout-bridge profile whoami          # show account info for the active profile
 ```
 
-State lives in `~/.config/agrout-bridge/`. API keys and session tokens are
-written with file mode `0600` and are never logged.
+State lives in `~/.config/agrout-bridge/`. API keys are written with file
+mode `0600` and are never logged. When a key is saved (via the login page
+or `profile add`), `Profile.apiKeyAt` records when it was stored so the TUI
+can show the full date.
 
 ## Architecture
 
@@ -67,7 +63,7 @@ agrout-bridge/
 │       │   ├── spoof.dart          # Claude Code spoof header constants
 │       │   ├── waf.dart            # WAF cookie jar (warmup, capture, merge, persist)
 │       │   ├── api_client.dart     # AgentRouter HTTP (New API endpoints)
-│       │   ├── login.dart          # Local sign-in callback server + OAuth provider relay
+│       │   ├── login.dart          # Local sign-in server (paste API key, validate /v1/models)
 │       │   ├── usage_store.dart    # Aggregated usage + cost from response billing
 │       │   ├── log_store.dart      # JSONL activity log
 │       │   └── updater.dart        # Self-update: API cache + download .tgz + npm install -g
@@ -106,13 +102,12 @@ agrout-bridge/
 ```bash
 agrout-bridge run                        # TUI mode (auto-starts proxy)
 agrout-bridge run --server               # Headless server mode
+agrout-bridge login                      # Headless login: paste an API key on the local page
 agrout-bridge profile add <name> [key]   # Add API key profile (prompt if key omitted)
 agrout-bridge profile list
 agrout-bridge profile use <name>
 agrout-bridge profile remove <name>
-agrout-bridge profile login              # Local sign-in flow (copy URL in TUI)
-agrout-bridge profile logout
-agrout-bridge profile whoami
+agrout-bridge profile login              # Alias of `login` (same headless flow)
 agrout-bridge update                     # Download and install latest stable release
 agrout-bridge help
 agrout-bridge --version
@@ -316,7 +311,7 @@ actual bound port is visible via `/info` (`serverPort`) and `/health`.
 
 | Key | Page | Data |
 |-----|------|------|
-| `1` | Profile | Active profile, session info, WAF state |
+| `1` | Profile | Active profile, API key (masked), added date, billing, WAF state |
 | `2` | Usage & Cost | Token + cost aggregates from response billing |
 | `3` | Models | Live model list + per-model health |
 | `4` | Proxy Config | Port, endpoints, uptime, circuit, active streams |
@@ -401,4 +396,4 @@ When making changes to this project, the AI agent must:
    `bin/agrout-bridge.js`. A mismatched version produces a tarball that does
    not match its tag. Do not skip this.
 4. Never commit API keys, session tokens, or any `~/.config/agrout-bridge/`
-   artifact. `.gitignore` must cover them.
+   artifact (API keys are the credential now; session tokens no longer exist).

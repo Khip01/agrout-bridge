@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Profiles are API-key only. Session tokens removed.** `Profile` no longer
+  stores `authToken` / `authTokenAt` / `accountInfo`, and `isLoggedIn` is
+  gone. The proxy never used the session token (it authenticates with the
+  API key), and AgentRouter's provider OAuth session cannot be captured
+  automatically, so the token was dead weight. `profile logout` and
+  `profile whoami` subcommands are removed; login web now only ever stores
+  an API key.
+- **Login flow is now headless and single-key friendly.**
+  - New top-level `agrout-bridge login` prints the sign-in URL and waits;
+    the browser page now has two fields (optional key name + API key) and a
+    "Add API key" button, then redirects to a success page that says
+    "return to the bridge". `agrout-bridge profile login` remains an alias.
+  - No placeholder profile is written before a key arrives: `login` reuses
+    the active profile (renames it from the form's name field) or creates
+    one only after a valid key is pasted. This also fixes a race where two
+    login servers writing the profile store could clobber an existing key.
+  - The sign-in page no longer offers provider OAuth buttons (GitHub /
+    LinuxDO) because the bridge cannot read the provider cookie; it links
+    to the dashboard where an API key is created.
+- **Profile page shows when the key was added.** `Profile.apiKeyAt` records
+  the store time, shown as a full date on the TUI Profile page.
+
+### Removed
+
+- `agentrouter.org` session endpoints (`/api/user/login`,
+  `/api/oauth/state`, `/api/user/self`, `/api/user/subscription`,
+  `/api/user/dashboard`), `fetchSelf` / `fetchSubscription` /
+  `fetchDashboard` / `fetchOauthConfig` / `fetchOauthState`, and the
+  `LoginResult` type.
+
 ## v0.1.16 (2026-08-16)
 
 ### Docs

@@ -3,61 +3,54 @@ import 'dart:io';
 
 /// A single AgentRouter identity held by the bridge.
 ///
-/// The primary credential is the chat API key (`sk-...`). The optional
-/// `authToken` is a session token captured from a local sign-in flow and
-/// grants access to dashboard endpoints (e.g. `/api/user/self`,
-/// `/api/user/subscription`, `/api/user/dashboard`) that reject chat keys.
+/// The credential is the chat API key (`sk-...` from the agentrouter.org
+/// dashboard). AgentRouter sign-in is OAuth-only and the bridge cannot
+/// capture the provider session cookie automatically (GitHub rejects an
+/// unregistered `redirect_uri`), so a profile is API-key only. Session
+/// tokens and account-info enrichment were removed: they never fed the
+/// proxy path, and quota/usage is available from the OpenAI-style billing
+/// endpoints with the API key alone.
 ///
 /// `wafCookies` holds the live WAF session cookies (`acw_tc` plus any
 /// rotated siblings) so the proxy does not have to re-warm after restart.
 /// `modelCache` is the most recent successful `/v1/models` response
 /// (per-key model permissions); the local proxy merges this with the
-/// static fallback list before serving `/v1/models`.
+/// static fallback list before serving `/v1/models`. `apiKeyAt` is when the
+/// current [apiKey] was stored (falls back to [createdAt] for legacy rows).
 class Profile {
   final String id;
   final String name;
   final String apiKey;
-  final String? authToken;
-  final DateTime? authTokenAt;
   final DateTime createdAt;
+  final DateTime? apiKeyAt;
   final Map<String, String> wafCookies;
   final List<String> modelCache;
-  final Map<String, dynamic>? accountInfo;
 
   Profile({
     required this.id,
     required this.name,
     required this.apiKey,
-    this.authToken,
-    this.authTokenAt,
     required this.createdAt,
+    this.apiKeyAt,
     this.wafCookies = const {},
     this.modelCache = const [],
-    this.accountInfo,
   });
-
-  bool get isLoggedIn => authToken != null && authToken!.isNotEmpty;
 
   Profile copyWith({
     String? name,
     String? apiKey,
-    String? authToken,
-    bool clearAuthToken = false,
-    DateTime? authTokenAt,
+    DateTime? apiKeyAt,
     Map<String, String>? wafCookies,
     List<String>? modelCache,
-    Map<String, dynamic>? accountInfo,
   }) {
     return Profile(
       id: id,
       name: name ?? this.name,
       apiKey: apiKey ?? this.apiKey,
-      authToken: clearAuthToken ? null : (authToken ?? this.authToken),
-      authTokenAt: clearAuthToken ? null : (authTokenAt ?? this.authTokenAt),
       createdAt: createdAt,
+      apiKeyAt: apiKeyAt ?? this.apiKeyAt,
       wafCookies: wafCookies ?? this.wafCookies,
       modelCache: modelCache ?? this.modelCache,
-      accountInfo: accountInfo ?? this.accountInfo,
     );
   }
 
@@ -65,12 +58,10 @@ class Profile {
         'id': id,
         'name': name,
         'apiKey': apiKey,
-        if (authToken != null) 'authToken': authToken,
-        if (authTokenAt != null) 'authTokenAt': authTokenAt!.toIso8601String(),
         'createdAt': createdAt.toIso8601String(),
+        if (apiKeyAt != null) 'apiKeyAt': apiKeyAt!.toIso8601String(),
         'wafCookies': wafCookies,
         'modelCache': modelCache,
-        if (accountInfo != null) 'accountInfo': accountInfo,
       };
 
   factory Profile.fromJson(Map<String, dynamic> json) {
@@ -80,12 +71,10 @@ class Profile {
       id: json['id'] as String,
       name: json['name'] as String,
       apiKey: json['apiKey'] as String,
-      authToken: json['authToken'] as String?,
-      authTokenAt: json['authTokenAt'] != null ? DateTime.parse(json['authTokenAt'] as String) : null,
       createdAt: DateTime.parse(json['createdAt'] as String),
+      apiKeyAt: json['apiKeyAt'] != null ? DateTime.parse(json['apiKeyAt'] as String) : null,
       wafCookies: waf,
       modelCache: cache,
-      accountInfo: (json['accountInfo'] as Map?)?.cast<String, dynamic>(),
     );
   }
 }
@@ -252,7 +241,7 @@ class ProfileStore {
   }
 
   /// Add a new profile. Throws [StateError] if the name or id is already taken.
-  Profile add({required String name, required String apiKey, Map<String, dynamic>? accountInfo}) {
+  Profile add({required String name, required String apiKey}) {
     if (byName(name) != null) throw StateError('Profile "$name" already exists');
     final id = _generateId(name);
     if (_byId.containsKey(id)) throw StateError('Profile id collision: $id');
@@ -261,7 +250,7 @@ class ProfileStore {
       name: name,
       apiKey: apiKey,
       createdAt: DateTime.now(),
-      accountInfo: accountInfo,
+      apiKeyAt: DateTime.now(),
     );
     _byId[profile.id] = profile;
     save();
@@ -269,10 +258,11 @@ class ProfileStore {
   }
 
   /// Upsert helper for callers that have already mutated a profile via
-  /// [Profile.copyWith]. Persists immediately.
-  void upsert(Profile profile) {
+  /// [Profile.copyWith]. Persists immediately and returns the stored profile.
+  Profile upsert(Profile profile) {
     _byId[profile.id] = profile;
     save();
+    return profile;
   }
 
   /// Remove by id. Returns true if a profile was removed.

@@ -15,7 +15,7 @@ TUI for daemon / Docker usage.
 - OpenAI + Anthropic compatible local proxy (`/v1/messages`, `/v1/chat/completions`)
 - WAF spoof: Claude Code client headers + `acw_tc` cookie warmup + per-profile persistence
 - SSE streaming pass-through with format-aware terminator (`message_stop` / `data: [DONE]`)
-- Multi-profile: API key + optional session token from local sign-in flow
+- Single-key profile: API key stored via `login` or `profile add`, one active
 - TUI dashboard: profile, usage/cost, models, proxy config, log side panel
 - Headless `--server` mode for daemon / Docker
 - Self-update via GitHub Release `.tgz`
@@ -46,13 +46,14 @@ agrout-bridge update
 
 ```bash
 agrout-bridge profile add my-key           # prompts for API key
+agrout-bridge login                        # headless login: paste an API key on the local page
 agrout-bridge run                          # TUI mode
 agrout-bridge run --server                 # headless
 ```
 
 In the TUI:
 
-- Press `[l]` to sign in (open the local sign-in link in your browser)
+- Press `[l]` to open the login URL (paste an API key)
 - Press `[p]` to configure the proxy port
 - Press `[1] [2] [3] [4]` to switch pages
 - Press `[Ctrl+L]` to toggle the log side panel

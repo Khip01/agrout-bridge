@@ -66,37 +66,33 @@ void main() {
         id: 'p1',
         name: 'work',
         apiKey: 'sk-test',
-        authToken: 'sess',
-        authTokenAt: DateTime.utc(2026, 8, 1),
         createdAt: DateTime.utc(2026, 1, 1),
+        apiKeyAt: DateTime.utc(2026, 8, 2),
         wafCookies: {'acw_tc': 'abc'},
         modelCache: ['claude-opus-4-8'],
-        accountInfo: {'username': 'me'},
       );
       final r = Profile.fromJson(p.toJson());
       expect(r.id, 'p1');
       expect(r.name, 'work');
       expect(r.apiKey, 'sk-test');
-      expect(r.authToken, 'sess');
-      expect(r.authTokenAt, DateTime.utc(2026, 8, 1));
       expect(r.createdAt, DateTime.utc(2026, 1, 1));
+      expect(r.apiKeyAt, DateTime.utc(2026, 8, 2));
       expect(r.wafCookies['acw_tc'], 'abc');
       expect(r.modelCache, ['claude-opus-4-8']);
-      expect(r.accountInfo!['username'], 'me');
     });
 
-    test('copyWith(clearAuthToken: true) drops the session token', () {
+    test('copyWith overwrites apiKey / wafCookies / modelCache only', () {
       final p = Profile(
         id: 'p1',
         name: 'n',
         apiKey: 'k',
-        authToken: 'tok',
-        authTokenAt: DateTime.now(),
         createdAt: DateTime.now(),
       );
-      final cleared = p.copyWith(clearAuthToken: true);
-      expect(cleared.authToken, isNull);
-      expect(cleared.authTokenAt, isNull);
+      final r = p.copyWith(apiKey: 'k2', wafCookies: {'x': 'y'}, modelCache: ['m1']);
+      expect(r.apiKey, 'k2');
+      expect(r.wafCookies['x'], 'y');
+      expect(r.modelCache, ['m1']);
+      expect(r.name, 'n');
     });
   });
 

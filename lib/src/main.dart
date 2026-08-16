@@ -17,13 +17,11 @@ const _usage = '''agrout-bridge  v$bridgeVersion
 Usage:
   agrout-bridge run                        Start the bridge in TUI mode
   agrout-bridge run --server               Start the bridge in headless server mode
+  agrout-bridge login                      Open local sign-in link to add an API key
   agrout-bridge profile add <name> [key]   Add an AgentRouter API key profile
   agrout-bridge profile list               List configured profiles
   agrout-bridge profile use <name>         Set the active profile
   agrout-bridge profile remove <name>      Delete a profile
-  agrout-bridge profile login              Open local sign-in link to capture session token
-  agrout-bridge profile logout             Clear the stored session token
-  agrout-bridge profile whoami             Show account info for the active profile
   agrout-bridge update                     Download and install latest stable release
   agrout-bridge help                       Show this help screen
   agrout-bridge -v, --version              Print version string
@@ -53,6 +51,9 @@ Future<void> main(List<String> args) async {
     switch (cmd) {
       case 'run':
         await _runCommand(rest);
+        return;
+      case 'login':
+        await _loginCommand();
         return;
       case 'profile':
         await _profileCommand(rest);
@@ -133,7 +134,7 @@ Future<void> _runCommand(List<String> args) async {
 
 Future<void> _profileCommand(List<String> args) async {
   if (args.isEmpty) {
-    stderr.writeln('profile: missing subcommand (add | list | use | remove | login | logout | whoami)');
+    stderr.writeln('profile: missing subcommand (add | list | use | remove | login)');
     exit(1);
   }
   final profiles = ProfileStore();
@@ -156,13 +157,7 @@ Future<void> _profileCommand(List<String> args) async {
       await _profileRemove(profiles, config, rest);
       return;
     case 'login':
-      await _profileLogin(profiles, config);
-      return;
-    case 'logout':
-      await _profileLogout(profiles);
-      return;
-    case 'whoami':
-      await _profileWhoami(profiles);
+      await _loginCommand();
       return;
     default:
       stderr.writeln('profile: unknown subcommand "$sub"');
@@ -218,8 +213,7 @@ void _profileList(ProfileStore profiles, ConfigStore config) {
   }
   for (final p in profiles.all) {
     final active = p.id == config.config.activeProfileId ? '*' : ' ';
-    final auth = p.isLoggedIn ? 'logged-in' : 'key-only';
-    stdout.writeln('$active ${p.name.padRight(20)} ${auth.padRight(11)} created=${p.createdAt.toIso8601String().substring(0, 10)}');
+    stdout.writeln('$active ${p.name.padRight(20)} created=${p.createdAt.toIso8601String().substring(0, 10)}');
   }
 }
 
@@ -256,30 +250,58 @@ Future<void> _profileRemove(ProfileStore profiles, ConfigStore config, List<Stri
   stdout.writeln('Removed profile "${p.name}".');
 }
 
-Future<void> _profileLogin(ProfileStore profiles, ConfigStore config) async {
-  final activeId = config.config.activeProfileId;
-  if (activeId == null) {
-    stderr.writeln('profile login: no active profile. Run `profile use <name>` first.');
-    exit(1);
-  }
-  final profile = profiles.byId(activeId);
-  if (profile == null) {
-    stderr.writeln('profile login: active profile not found');
-    exit(1);
-  }
+/// Headless login: serve the local sign-in page, print the URL, and wait.
+/// Uses the active profile, or creates a single "default" profile if none
+/// exists yet (single-key mode). After the user pastes the API key in the
+/// browser the key is saved and the browser tells them to return to the CLI.
+/// Headless login: serve the local sign-in page, print the URL, and wait.
+/// Uses the active profile, or creates a single "default" profile only when
+/// a key is actually pasted (never persists an empty profile). After the
+/// user pastes the API key in the browser the key is saved and the browser
+/// tells them to return to the CLI.
+Future<void> _loginCommand() async {
+  final profiles = ProfileStore();
+  final config = ConfigStore();
+  _loadStores(profiles, config);
+
+  // Single-key focus: always operate on one profile. Reuse the active one,
+  // else the first, else stay undefined until a key arrives (so a failed or
+  // aborted login never writes a placeholder profile).
+  final existing = config.config.activeProfileId != null
+      ? profiles.byId(config.config.activeProfileId!)
+      : null;
+  final fallback = existing ?? (profiles.all.isNotEmpty ? profiles.all.first : null);
+
   final client = AgentRouterClient();
   final flow = LoginFlow(client);
   final url = await flow.start(onResult: (outcome) async {
     if (outcome.success) {
-      applyLoginOutcome(profile, outcome, profiles);
-      stdout.writeln('Login successful${outcome.username != null ? ' as ${outcome.username}' : ''}.');
+      final name = outcome.keyName ?? fallback?.name ?? 'default';
+      Profile target;
+      if (fallback != null) {
+        // Update the existing profile in place.
+        target = profiles.upsert(fallback.copyWith(
+          apiKey: outcome.apiKey,
+          apiKeyAt: DateTime.now(),
+          name: outcome.keyName ?? fallback.name,
+        ));
+      } else {
+        // No profile yet: create one now that a valid key has arrived.
+        target = profiles.add(name: name, apiKey: outcome.apiKey!);
+      }
+      config.config.activeProfileId = target.id;
+      config.save();
+      stdout.writeln('API key saved to profile "${name}".');
+      stdout.writeln('Return to the bridge: the active profile is now ready.');
     } else {
       stderr.writeln('Login failed: ${outcome.message ?? 'unknown error'}');
     }
   });
-  stdout.writeln('Open this sign-in URL in a new browser tab to authenticate:');
+  stdout.writeln('Open this sign-in URL in a new browser tab, paste your API key, then press "Add API key":');
   stdout.writeln('  $url');
+  stdout.writeln('After saving, return here: the API key is stored and the proxy uses it.');
   stdout.writeln('The server will auto-close after 10 minutes.');
+  stdout.flush();
   // Wait for SIGINT so the user can press Ctrl+C to release the URL.
   final completer = Completer<void>();
   ProcessSignal.sigint.watch().listen((_) {
@@ -288,33 +310,6 @@ Future<void> _profileLogin(ProfileStore profiles, ConfigStore config) async {
   await completer.future;
   await flow.stop();
   client.close();
-}
-
-Future<void> _profileLogout(ProfileStore profiles) async {
-  var touched = 0;
-  for (final p in profiles.all) {
-    if (p.isLoggedIn) {
-      profiles.upsert(p.copyWith(clearAuthToken: true));
-      touched++;
-    }
-  }
-  stdout.writeln('Cleared session token from $touched profile(s).');
-}
-
-Future<void> _profileWhoami(ProfileStore profiles) async {
-  for (final p in profiles.all) {
-    if (p.isLoggedIn && p.accountInfo != null) {
-      stdout.writeln('Profile: ${p.name}');
-      stdout.writeln('  username:   ${p.accountInfo!['username'] ?? '-'}');
-      stdout.writeln('  email:      ${p.accountInfo!['email'] ?? '-'}');
-      stdout.writeln('  group:      ${p.accountInfo!['group'] ?? '-'}');
-      stdout.writeln('  quota:      ${p.accountInfo!['quota'] ?? '-'}');
-      stdout.writeln('  used_quota: ${p.accountInfo!['used_quota'] ?? '-'}');
-      return;
-    }
-  }
-  stderr.writeln('profile whoami: no logged-in profile. Run `profile login`.');
-  exit(1);
 }
 
 Future<void> _updateCommand() async {

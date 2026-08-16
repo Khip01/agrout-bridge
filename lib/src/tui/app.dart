@@ -450,7 +450,7 @@ class AppState extends State<AgroutApp> {
     if (id == null) return 'no profile';
     final p = _profiles.byId(id);
     if (p == null) return 'unknown';
-    return '${p.name}${p.isLoggedIn ? " (logged-in)" : ""}';
+    return p.name;
   }
 
   // ── Body: switches between panels and main split ─────────────────
@@ -515,7 +515,7 @@ class AppState extends State<AgroutApp> {
       _kv('ID', p?.id ?? '-'),
       _kv('API key', p == null ? '-' : _mask(p.apiKey)),
       _kv('Created', p?.createdAt.toIso8601String().substring(0, 10) ?? '-'),
-      _kv('Logged in', p == null ? '-' : (p.isLoggedIn ? 'yes' : 'no')),
+      _kv('Key added', p == null ? '-' : _fmtFullDate(p.apiKeyAt ?? p.createdAt)),
       if (_billing != null) ...[
         _section('Billing (via API key)'),
         _kv('Soft limit (quota)', _fmtLimit(_billing!['subscription']?['soft_limit_usd'])),
@@ -523,23 +523,10 @@ class AppState extends State<AgroutApp> {
         _kv('Used (last 30d)', _fmtUsed(_billing!['usage']?['total_usage'])),
       ] else if (_loadingBilling)
         Text('Fetching billing...', style: TextStyle(color: Colors.grey)),
-      if (p?.isLoggedIn == true) ...[
-        _kv('Auth token at', p!.authTokenAt?.toIso8601String().substring(0, 19) ?? '-'),
-        if (p.accountInfo != null) ...[
-          _section('Account info'),
-          _kv('Username', p.accountInfo!['username']?.toString() ?? '-'),
-          _kv('Email', p.accountInfo!['email']?.toString() ?? '-'),
-          _kv('Group', p.accountInfo!['group']?.toString() ?? '-'),
-          _kv('Quota', p.accountInfo!['quota']?.toString() ?? '-'),
-          _kv('Used', p.accountInfo!['used_quota']?.toString() ?? '-'),
-          if (p.accountInfo!['remaining_quota'] != null)
-            _kv('Remaining', p.accountInfo!['remaining_quota'].toString()),
-        ],
-      ],
       _section('Available profiles'),
       ..._profiles.all.map((pr) => Padding(
             padding: const EdgeInsets.symmetric(vertical: 0),
-            child: Text('${pr.id == id ? "*" : " "} ${pr.name}${pr.isLoggedIn ? " (logged-in)" : ""}', style: const TextStyle(color: Colors.grey)),
+            child: Text('${pr.id == id ? "*" : " "} ${pr.name}', style: const TextStyle(color: Colors.grey)),
           )),
       if (_profiles.all.isEmpty)
         Text('No profiles. Run `agrout-bridge profile add <name> <key>` then restart.', style: TextStyle(color: Colors.grey)),
@@ -550,6 +537,18 @@ class AppState extends State<AgroutApp> {
     if (v is! num) return '-';
     if (v >= 100000000) return 'unlimited';
     return v.toStringAsFixed(2);
+  }
+
+  static const _months = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ];
+  String _fmtFullDate(DateTime dt) {
+    final d = dt.toLocal();
+    final hh = d.hour.toString().padLeft(2, '0');
+    final mm = d.minute.toString().padLeft(2, '0');
+    final ss = d.second.toString().padLeft(2, '0');
+    return '${_months[d.month - 1]} ${d.day}, ${d.year} at $hh:$mm:$ss';
   }
 
   String _fmtUsed(dynamic v) {
@@ -937,7 +936,7 @@ class AppState extends State<AgroutApp> {
     add('Help', Colors.cyan);
     add('');
     add('Pages:', Colors.cyan);
-    add('  [1] Profile       - active profile, key, login state, account info');
+    add('  [1] Profile       - active profile, key, billing');
     add('  [2] Usage & Cost  - request counts, success rate, tokens, cost, per-model');
     add('  [3] Models        - live model list (press Enter to copy id)');
     add('  [4] Proxy Config  - port, endpoints, circuit, WAF cookies');
@@ -960,7 +959,7 @@ class AppState extends State<AgroutApp> {
     add('');
     add('Other:', Colors.cyan);
     add('  [p]  Port configuration panel');
-    add('  [l]  Open login URL (captures session token)');
+    add('  [l]  Open login URL (paste API key)');
     add('  [h]  Help');
     add('  [q]  Quit');
 
@@ -1065,16 +1064,12 @@ class AppState extends State<AgroutApp> {
 
   // ── Login panel (local sign-in URL) ───────────────────────────────
   void _openLoginPanel() {
-    final activeId = _config.config.activeProfileId;
-    if (activeId == null) {
-      _setStatus('No active profile. Run `profile add` first.', duration: 4);
-      return;
-    }
-    final p = _profiles.byId(activeId);
-    if (p == null) {
-      _setStatus('Active profile not found.', duration: 4);
-      return;
-    }
+    // Single-key focus: reuse the active profile, else the first existing
+    // profile, else allow a fresh login that creates a profile on success.
+    final existing = _config.config.activeProfileId != null
+        ? _profiles.byId(_config.config.activeProfileId!)
+        : null;
+    final fallback = existing ?? (_profiles.all.isNotEmpty ? _profiles.all.first : null);
     // Reset dialog state into the idle state: URL will be highlighted,
     // Copy URL is the focused action, no error text.
     _panel = _Panel.login;
@@ -1082,23 +1077,32 @@ class AppState extends State<AgroutApp> {
     _loginState = _LoginState.loading;
     _loginError = null;
     _loginMessage = 'Starting local sign-in server...';
-    _startLoginServer(p);
+    _startLoginServer(fallback);
     setState(() {});
   }
 
-  Future<void> _startLoginServer(profile) async {
+  Future<void> _startLoginServer(Profile? fallback) async {
     try {
       final client = AgentRouterClient();
       final flow = LoginFlow(client);
       final url = await flow.start(onResult: (outcome) async {
         if (outcome.success) {
-          applyLoginOutcome(profile, outcome, _profiles);
+          if (fallback != null) {
+            applyLoginOutcome(fallback, outcome, _profiles);
+          } else {
+            final created = _profiles.add(
+              name: outcome.keyName ?? 'default',
+              apiKey: outcome.apiKey!,
+            );
+            _config.config.activeProfileId = created.id;
+            _config.save();
+          }
           _loginState = _LoginState.success;
           _loginError = null;
-          _loginMessage = 'Login successful${outcome.username != null ? " as ${outcome.username}" : ""}';
+          _loginMessage = 'Login successful';
           setState(() {});
           _setStatus('API key validated, login successful', duration: 4);
-          LogStore.success('Login successful${outcome.username != null ? " as ${outcome.username}" : ""}');
+          LogStore.success('Login successful');
         } else {
           _loginState = _LoginState.failed;
           _loginError = outcome.message ?? 'token rejected by agentrouter.org';
@@ -1112,7 +1116,7 @@ class AppState extends State<AgroutApp> {
       // URL is ready → enter idle state: highlight the URL, enable copy.
       _loginState = _LoginState.idle;
       _loginError = null;
-      _loginMessage = 'Open the sign-in URL in a new browser tab, authenticate, then paste your API key in the form below.';
+      _loginMessage = 'Open the sign-in URL in a new browser tab, then paste your API key in the form below.';
       _loginExpiry?.cancel();
       _loginExpiry = Timer(const Duration(minutes: 10), _closeLoginPanel);
       LogStore.info('Login flow ready: $url');

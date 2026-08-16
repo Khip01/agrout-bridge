@@ -27,7 +27,7 @@ agrout-bridge/
 │       │   ├── spoof.dart          # Claude Code spoof header constants
 │       │   ├── waf.dart            # WAF cookie jar (parse, merge, serialize, classify)
 │       │   ├── api_client.dart     # AgentRouter HTTP client (login, self, models, chat, messages)
-│       │   ├── login.dart          # Local sign-in callback server + OAuth provider relay
+│       │   ├── login.dart          # Local sign-in server (paste API key, validate /v1/models)
 │       │   ├── usage_store.dart    # Aggregated usage + cost from response billing
 │       │   ├── log_store.dart      # JSONL activity log (2000 entries)
 │       │   └── updater.dart        # Self-update: API cache + download .tgz + npm install -g
@@ -153,42 +153,34 @@ The fix is a one-line bump in `spoof.dart` (for `/v1/messages`) or
 `/v1/models`. The live smoke test in `test/live_smoke_test.dart` is the
 single source of truth for that regression.
 
-## Login flow
+## Login flow (API key only)
 
 AgentRouter has no username/password registration: accounts are created and
 signed into exclusively through provider OAuth (GitHub or LinuxDO). The
-local sign-in flow opens the provider authorize URL and accepts a pasted
-API key / session token.
+bridge cannot capture the provider session cookie automatically (GitHub
+rejects a `redirect_uri` that is not registered on the AgentRouter OAuth
+app), so the local sign-in flow is API-key only: the user pastes a
+dashboard API key, it is validated against `/v1/models`, and stored. No
+session token or account-info enrichment is tracked.
 
 ```
-TUI [l]  ──> LoginFlow.start()           ──>  HttpServer.bind(127.0.0.1, ephemeral)
-                                             │
-Browser  ──> GET  http://127.0.0.1:.../login  <──┤  serve OAuth page (2 provider buttons + paste field)
-Browser  ──> GET  .../oauth/github          <──┤  LoginFlow._handleOAuth
-                                             │    ├─  GET /api/oauth/state?mode=login   -> signed state token
-                                             │    ├─  GET /api/status                   -> github_client_id / linuxdo_client_id
-                                             │    └─  302 -> provider authorize URL (state carried)
-                                             │         github:  https://github.com/login/oauth/authorize
-                                             │         linuxdo: https://connect.linux.do/oauth2/authorize
-Browser  ──> POST .../login/token          <──┤  LoginFlow._handleTokenSubmit
-                                             │    ├─  validate against GET /v1/models (accepts API key)
-                                             │    └─  Profile.upsert(apiKey)  (best-effort /api/user/self)
+login (CLI or TUI [l])  ──> LoginFlow.start()  ──>  HttpServer.bind(127.0.0.1, ephemeral)
+                                                     │
+Browser  ──> GET  http://127.0.0.1:.../login  <──────┤  serve page (name + API key fields)
+Browser  ──> POST .../login/token            <──────┤  LoginFlow._handleTokenSubmit
+                                                     │    ├─  validate against GET /v1/models (accepts API key)
+                                                     │    └─  Profile.upsert(apiKey) + stamp apiKeyAt
+                                                     │         (creates a profile if none exists)
+Browser  ──> GET  /success                   <──────┤  LoginFlow._serveSuccess ("return to the bridge")
 
-Browser  ──> GET  /success                <──┤  LoginFlow._serveSuccess
-                                             │
-TUI       <──  onResult(LoginOutcome)     <──┘  panel updates, [Esc] closes the server
+CLI/TUI  <──  onResult(LoginOutcome)         <──────┘  prints "API key saved to profile X"
 ```
 
-The provider OAuth cookie is set on the agentrouter.org domain, so the local
-bridge can never read it; that is why the flow ends with a manual token
-paste. The bridge tried bouncing the provider redirect back to its own
-`/oauth/callback` with a `redirect_uri` on `127.0.0.1`, but GitHub rejects
-any `redirect_uri` that is not registered on the AgentRouter OAuth app, so
-auto-capture is not possible. Dashboard API keys are validated against
-`/v1/models` (the check that accepts them); `/api/user/self` is best-effort
-enrichment only, since that session-only endpoint rejects API keys with
-"access token 无效". Tokens never leave the profile JSON (mode `0600`) and
-are never logged.
+Dashboard API keys are validated against `/v1/models` (the check that
+accepts them). `POST /login/token` parses an optional `name` field to name
+the profile. Keys never leave the profile JSON (mode `0600`) and are never
+logged. The proxy path uses the API key alone; billing (below) also works
+with the API key, so no session token is required anywhere.
 
 ## Billing info (API key only)
 
@@ -209,6 +201,6 @@ sign-in.
 | File | Mode | Purpose |
 |------|------|---------|
 | `~/.config/agrout-bridge/config.json` | `0600` | port, listen address, active profile id, optional proxy auth token |
-| `~/.config/agrout-bridge/profiles.json` | `0600` | list of `{id, name, apiKey, authToken?, wafCookies, modelCache, accountInfo?}` |
+| `~/.config/agrout-bridge/profiles.json` | `0600` | list of `{id, name, apiKey, createdAt, apiKeyAt?, wafCookies, modelCache}` |
 | `~/.config/agrout-bridge/logs.jsonl` | normal | JSONL activity log (2000 entry cap, oldest evicted) |
 | `~/.config/agrout-bridge/update-cache.json` | normal | last seen `releases/latest` tag + timestamp (1h TTL) |

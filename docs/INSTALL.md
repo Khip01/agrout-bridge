@@ -44,7 +44,7 @@ In the TUI:
 - `[o]` copy OpenAI endpoint URL
 - `[a]` copy Anthropic endpoint URL
 - `[p]` open the port config panel
-- `[l]` open the local sign-in link (to capture a session token)
+- `[l]` open the local sign-in link (to add an API key)
 - `[Ctrl+L]` toggle the log side panel
 - `[q]` quit
 

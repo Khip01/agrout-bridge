@@ -27,7 +27,7 @@ log is a sidebar, fullscreen log when toggled.
 
 | Key | Page | Data |
 |-----|------|------|
-| `1` | Profile | Active profile, key (masked), login state, billing quota/usage (via API key), account info (when logged-in), list of all profiles |
+| `1` | Profile | Active profile, key (masked), key-added date, billing quota/usage (via API key), list of all profiles |
 | `2` | Usage & Cost | Total / success / streamed request counts, success rate, tokens (in/out/cache), cumulative cost, per-model breakdown |
 | `3` | Models | Live model list. Press `Enter` on a model to copy its id. |
 | `4` | Proxy Config | Port, listen address, uptime, active streams, circuit state, WAF cookie entries, model health failures |
@@ -41,7 +41,7 @@ log is a sidebar, fullscreen log when toggled.
 | `o` | Copy OpenAI endpoint URL to clipboard |
 | `a` | Copy Anthropic endpoint URL to clipboard |
 | `p` | Port configuration panel |
-| `l` | Local sign-in link panel (captures session token) |
+| `l` | Local sign-in link panel (paste API key) |
 | `h` | Help panel |
 | `q` | Quit confirmation |
 | `Ctrl+L` | Toggle log side panel |
@@ -72,28 +72,25 @@ log is a sidebar, fullscreen log when toggled.
 
 ## Login panel
 
-`[l]` starts a local sign-in server on `127.0.0.1:<ephemeral>` and
-shows the URL. The user opens it in any browser and signs in through
-provider OAuth. AgentRouter has no username/password registration, so
-the local page shows "Sign in with GitHub" and "Sign in with LinuxDO"
-buttons, each opening the real provider authorize URL (state token from
-`/api/oauth/state`, client id from `/api/status`). After completing
-sign-in in the browser the user pastes the resulting session token /
-API key into the local page, and the bridge:
+`[l]` starts a local sign-in server on `127.0.0.1:<ephemeral>` and shows
+the URL. The user opens it in any browser and pastes an AgentRouter
+dashboard API key (`sk-...`), optionally with a key name. AgentRouter has
+no username/password registration and the bridge cannot capture the
+provider OAuth session automatically, so the flow is API-key only: the
+pasted value is validated against `/v1/models` and stored on the active
+profile (creating one if none exists). `Profile.apiKeyAt` records when the
+key was stored, shown on the Profile page.
 
-1. Best-effort: fetches `/api/user/self` to populate the Profile page
-   with username / email / quota.
-2. Stores the session token on the active profile.
-
-The page also has a paste field as a fallback. Pasting a dashboard API
-key (`sk-...`) works directly: it is validated against `/v1/models` and
-stored as the profile's API key.
-
-Note: the bridge cannot auto-capture the session. The provider OAuth
+Note: the bridge cannot auto-capture the provider session. The OAuth
 cookie is set on the agentrouter.org domain, and GitHub rejects a
 `redirect_uri` that is not registered on the AgentRouter OAuth app, so a
-manual paste is required. Credit and usage are available from the API key
-alone via the billing endpoints (see Profile page), no session needed.
+manual API key paste is the only path. Credit and usage are available from
+the API key alone via the billing endpoints (see Profile page), no session
+needed.
+
+The same flow exists headless via `agrout-bridge login` (or
+`agrout-bridge profile login`): the CLI prints the URL, and after the key
+is saved the browser says "return to the bridge".
 
 Keymap (active while the panel is open):
 

@@ -5,38 +5,31 @@ import 'dart:io';
 import '../models/profile.dart';
 import 'api_client.dart';
 
-/// Outcome of a login attempt (driven from either the local page or the
-/// in-app paste-session-token fallback). [apiKey] carries a pasted API key
-/// validated against `/v1/models`; [sessionToken] carries a session token
-/// captured from provider OAuth (or a pasted key that also passes the
-/// session check).
+/// Outcome of a login attempt. [apiKey] carries a pasted API key validated
+/// against `/v1/models`; [keyName] is the optional human label entered in
+/// the form. AgentRouter sign-in is OAuth-only and the bridge cannot
+/// capture the provider session cookie automatically, so a profile is
+/// API-key only; no session token or account info is tracked.
 class LoginOutcome {
   final bool success;
-  final String? sessionToken;
   final String? apiKey;
-  final String? username;
+  final String? keyName;
   final String? message;
-  final Map<String, dynamic>? accountInfo;
   const LoginOutcome({
     required this.success,
-    this.sessionToken,
     this.apiKey,
-    this.username,
+    this.keyName,
     this.message,
-    this.accountInfo,
   });
 }
 
-/// Local sign-in flow: serves a tiny HTML page on 127.0.0.1 that redirects
-/// to the provider OAuth (GitHub / LinuxDO) authorize URL and accepts a
-/// pasted session token / API key. AgentRouter has no username/password
-/// registration, so credentials login is not offered. The pasted token is
-/// stored on the active profile and (best effort) verified against the
-/// dashboard via `GET /api/user/self`.
+/// Local sign-in flow: serves a tiny HTML page on 127.0.0.1 where the user
+/// pastes an API key (`sk-...`) from the agentrouter.org dashboard. The key
+/// is validated against `/v1/models` and stored on the active profile.
 ///
 /// The page is opened by the user via a copyable URL (the TUI surfaces it
 /// on `[l]` / `profile login`); nothing leaves the machine except the
-/// OAuth state/config lookups to `agentrouter.org`.
+/// model-list validation call to `agentrouter.org`.
 class LoginFlow {
   final AgentRouterClient client;
   LoginFlow(this.client);
@@ -77,10 +70,6 @@ class LoginFlow {
         await _servePage(req);
         return;
       }
-      if (req.method == 'GET' && (path == '/oauth/github' || path == '/oauth/linuxdo')) {
-        await _handleOAuth(path == '/oauth/linuxdo', req);
-        return;
-      }
       if (req.method == 'POST' && path == '/login/token') {
         await _handleTokenSubmit(req, onResult);
         return;
@@ -107,47 +96,13 @@ class LoginFlow {
     await req.response.close();
   }
 
-  /// Redirect the user's browser to the provider authorize URL. AgentRouter
-  /// has no username/password registration, so provider OAuth (GitHub /
-  /// LinuxDO) is the only sign-in path. We fetch the signed state token from
-  /// `/api/oauth/state` and the client ids from `/api/status`, then 302 to
-  /// the provider. The provider redirects back to agentrouter.org, which
-  /// issues the session; the user pastes their token back into the local
-  /// page (see [_handleTokenSubmit]) since the bridge cannot read the
-  /// provider cookie set on the agentrouter.org domain. The bridge tried
-  /// bouncing the redirect back to its own `/oauth/callback` via a
-  /// `redirect_uri` on `127.0.0.1`, but GitHub rejects a `redirect_uri`
-  /// that is not registered on the AgentRouter OAuth app.
-  Future<void> _handleOAuth(bool linuxdo, HttpRequest req) async {
-    final state = await client.fetchOauthState();
-    if (state == null) {
-      _redirectWithError(req, 'failed to obtain OAuth state from agentrouter.org');
-      return;
-    }
-    final cfg = await client.fetchOauthConfig();
-    final clientId = linuxdo ? cfg['linuxdo_client_id']?.toString() : cfg['github_client_id']?.toString();
-    if (clientId == null || clientId.isEmpty) {
-      _redirectWithError(req, linuxdo ? 'LinuxDO sign-in is not enabled' : 'GitHub sign-in is not enabled');
-      return;
-    }
-    final url = linuxdo
-        ? 'https://connect.linux.do/oauth2/authorize?response_type=code&client_id=$clientId&state=$state'
-        : 'https://github.com/login/oauth/authorize?client_id=$clientId&state=$state&scope=user:email';
-    req.response.statusCode = 302;
-    req.response.headers.set('Location', url);
-    await req.response.close();
-  }
-
-  /// Store a pasted API key / session token onto the active profile.
+  /// Store a pasted API key onto the active profile.
   ///
-  /// AgentRouter has two distinct credential types: an API key (`sk-...`
-  /// from the dashboard) that authorizes `/v1/*` proxy calls, and a session
-  /// token from provider OAuth that authorizes dashboard endpoints like
-  /// `/api/user/self`. Both start with `sk-`, so the bridge validates the
-  /// pasted value against `/v1/models` (the check that accepts an API key)
-  /// rather than `/api/user/self` (which rejects dashboard API keys with
-  /// "access token 无效"). If the value also works for `/api/user/self` we
-  /// capture account info best-effort.
+  /// AgentRouter authenticates proxying with the profile API key
+  /// (`sk-...` from the dashboard). The pasted value is validated against
+  /// `/v1/models` (the check that accepts a dashboard API key) before it is
+  /// saved; account-info enrichment via session-token endpoints was removed
+  /// because the bridge cannot capture a provider session cookie.
   Future<void> _handleTokenSubmit(HttpRequest req, void Function(LoginOutcome) onResult) async {
     final raw = <int>[];
     await for (final chunk in req) {
@@ -165,43 +120,27 @@ class LoginFlow {
       _redirectWithError(req, 'API key required');
       return;
     }
+    final keyName = (fields['name'] ?? '').trim();
 
-    // Primary validation: /v1/models accepts API keys (and session tokens).
+    // Validation: /v1/models accepts dashboard API keys.
     List<String> models;
     try {
       models = await client.fetchModels(apiKey: token);
     } catch (_) {
-      _redirectWithError(req, 'token rejected by agentrouter.org');
-      onResult(LoginOutcome(success: false, message: 'token rejected by agentrouter.org'));
+      _redirectWithError(req, 'API key rejected by agentrouter.org');
+      onResult(LoginOutcome(success: false, message: 'API key rejected by agentrouter.org'));
       return;
     }
     if (models.isEmpty) {
-      _redirectWithError(req, 'token rejected by agentrouter.org');
-      onResult(LoginOutcome(success: false, message: 'token rejected by agentrouter.org'));
+      _redirectWithError(req, 'API key rejected by agentrouter.org');
+      onResult(LoginOutcome(success: false, message: 'API key rejected by agentrouter.org'));
       return;
-    }
-
-    // Best-effort: if this token is also a session token, enrich account info.
-    // A dashboard API key will get `success:false` here (session-only
-    // endpoint). That is not a login failure, so leave accountInfo null.
-    Map<String, dynamic>? info;
-    String? user;
-    try {
-      final self = await client.fetchSelf(sessionToken: token);
-      if (self['success'] == true) {
-        final data = self['data'];
-        info = data is Map ? data.cast<String, dynamic>() : self;
-        user = info['username']?.toString() ?? info['display_name']?.toString();
-      }
-    } catch (_) {
-      // Not a session token; the API key is still valid for /v1/*.
     }
 
     onResult(LoginOutcome(
       success: true,
       apiKey: token,
-      username: user,
-      accountInfo: info,
+      keyName: keyName.isEmpty ? null : keyName,
     ));
 
     req.response.statusCode = 303;
@@ -223,6 +162,7 @@ class LoginFlow {
     req.response.statusCode = 303;
     req.response.headers.set('Location', '/login?err=${Uri.encodeQueryComponent(msg)}');
     req.response.headers.contentLength = 0;
+    req.response.close();
   }
 
   static const _loginHtml = '''
@@ -233,30 +173,24 @@ body { font: 14px/1.5 -apple-system, system-ui, sans-serif; background:#0f1115; 
 main { max-width:420px; margin:0 auto; }
 h1 { font-size:16px; margin:0 0 16px; color:#7fd4ff; }
 p { color:#9aa3ad; margin:0 0 14px; }
-a.btn { display:block; text-align:center; text-decoration:none; padding:10px; border-radius:4px; font-weight:600; margin:8px 0; }
-.btn-github { background:#2a6df4; color:#fff; }
-.btn-linuxdo { background:#1a1d23; border:1px solid #2a2f37; color:#e8e8e8; }
-.sep { border-top:1px solid #2a2f37; margin:20px 0; }
 label { display:block; margin:12px 0 4px; color:#9aa3ad; }
 input { width:100%; box-sizing:border-box; padding:8px; background:#1a1d23; color:#e8e8e8; border:1px solid #2a2f37; border-radius:4px; }
 button { margin-top:12px; width:100%; padding:10px; background:#2a6df4; color:#fff; border:none; border-radius:4px; font-weight:600; cursor:pointer; }
 .note { color:#7c8693; font-size:12px; margin-top:14px; }
 .err { color:#ff7777; font-size:13px; margin-top:10px; }
 </style></head><body><main>
- <h1>agrout-bridge | AgentRouter sign-in</h1>
-<p>AgentRouter accounts are created through GitHub or LinuxDO OAuth only.
-Open a provider sign-in below (opens in a new tab), then paste the resulting
-session token into the field, or paste your API key (`sk-...`) from the
-agentrouter.org dashboard directly.</p>
-<a class="btn btn-github" href="/oauth/github" target="_blank">Sign in with GitHub</a>
-<a class="btn btn-linuxdo" href="/oauth/linuxdo" target="_blank">Sign in with LinuxDO</a>
-<div class="sep"></div>
+  <h1>agrout-bridge | AgentRouter sign-in</h1>
+<p>Paste the AgentRouter dashboard API key (`sk-...`) below. Give it an
+optional name so you can recognise which key is in use. The bridge validates
+it against /v1/models and saves it to the active profile.</p>
 <form method="POST" action="/login/token">
-  <label>API key / session token (sk-...)</label>
+  <label>Key name (optional)</label>
+  <input type="text" name="name" placeholder="e.g. my-agentrouter-key">
+  <label>API key (sk-...)</label>
   <input type="password" name="token" placeholder="paste API key from agentrouter.org dashboard" required>
-  <button type="submit">Save key</button>
+  <button type="submit">Add API key</button>
 </form>
-<p class="note">This page is served from 127.0.0.1 by your running agrout-bridge process. Provider OAuth opens in a new tab so you can return here to paste the token; the bridge cannot read the agentrouter session cookie. Your dashboard API key works for proxying and for quota/usage display (Profile page), with no session token needed.</p>
+<p class="note">This page is served from 127.0.0.1 by your running agrout-bridge process. Get a key from the agentrouter.org dashboard (sign in via GitHub/LinuxDO there, then create an API key). The bridge cannot capture the agentrouter session cookie automatically, so it never asks for a session token. The API key alone supports proxying and quota/usage display (Profile page).</p>
 <script>
 const p = new URLSearchParams(location.search);
 if (p.get('err')) {
@@ -277,22 +211,21 @@ h1 { color:#7fd4ff; font-size:16px; }
 .note { color:#7c8693; font-size:12px; margin-top:18px; }
 </style></head><body><main>
 <h1>Sign-in successful</h1>
-<p>Your session token has been saved to the active profile. You can close this tab and return to the agrout-bridge TUI.</p>
+<p>Your API key has been saved to the active profile. You can close this tab and return to the agrout-bridge CLI or TUI.</p>
 <p class="note">agrout-bridge</p>
 </main></body></html>
 ''';
 }
 
 /// Save [outcome] onto [profile] (in place), persist via [ProfileStore].
-/// A pasted API key overwrites the profile's apiKey; a session token is
-/// stored as authToken.
+/// A pasted API key overwrites the profile's [Profile.apiKey] and stamps
+/// [Profile.apiKeyAt]; an optional key name renames the profile.
 void applyLoginOutcome(Profile profile, LoginOutcome outcome, ProfileStore store) {
-  if (!outcome.success) return;
+  if (!outcome.success || outcome.apiKey == null) return;
   final updated = profile.copyWith(
-    apiKey: outcome.apiKey ?? profile.apiKey,
-    authToken: outcome.sessionToken,
-    authTokenAt: outcome.sessionToken != null ? DateTime.now() : null,
-    accountInfo: outcome.accountInfo ?? profile.accountInfo,
+    apiKey: outcome.apiKey,
+    apiKeyAt: DateTime.now(),
+    name: outcome.keyName ?? profile.name,
   );
   store.upsert(updated);
 }
