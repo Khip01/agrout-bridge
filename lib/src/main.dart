@@ -91,11 +91,11 @@ Future<void> _printUpdateNoticeIfAny() async {
     final nxt = latest == null ? null : Updater.parseSemver(latest);
     if (cur != null && nxt != null && Updater.compareSemver(nxt, cur) > 0) {
       stdout.writeln();
-      stdout.writeln('Update available: v$bridgeVersion -> v$latest');
+      stdout.writeln('Update available: v$bridgeVersion -> $latest');
       stdout.writeln('Run `agrout-bridge update` to install it, or press [Shift+U] in the TUI.');
       stdout.writeln();
       stdout.flush();
-      LogStore.info('Update available: v$bridgeVersion -> v$latest');
+      LogStore.info('Update available: v$bridgeVersion -> $latest');
     }
   } catch (_) {
     // Best-effort; never block startup on a network blip.

@@ -4,6 +4,17 @@
 
 ### Fix
 
+- **In-TUI update no longer freezes or prints a doubled version.**
+  - The confirm dialog and update notice showed `-> vv0.1.21`: `_updateTag`
+    already carries the leading `v` (it is the GitHub tag), so the extra `v`
+    prefix was dropped everywhere (`Update Available!`, the confirm dialog,
+    the `[Shift+U]` help entry and the headless startup notice).
+  - Pressing `[y]` previously hung the TUI: `_doUpdate()` awaited
+    `_proxy.stop()`, which can block while an SSE stream is active, so
+    `shutdownApp(0)` never ran and the screen stayed frozen with stray
+    `updating...` text. The update path now spawns the detached
+    `agrout-bridge update` child and shuts the TUI down immediately without
+    awaiting the stop; the OS reaps the listener on exit.
 - **Port configuration now gives feedback and requires a test before save.**
   Previously pressing Enter in the dialog did nothing (the focused TextField
   consumed Enter, and the scan result was only shown, never actionable). The

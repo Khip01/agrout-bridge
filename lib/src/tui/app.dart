@@ -637,7 +637,7 @@ class AppState extends State<AgroutApp> {
           if (_updateTag != null) ...[
             Text('   ', style: const TextStyle(color: Colors.grey)),
             Text(
-              'Update Available! v$_updateTag',
+              'Update Available! $_updateTag',
               style: const TextStyle(
                 color: Color(0xFFFFD75E), // bright amber, distinct from the muted palette
                 fontWeight: FontWeight.bold,
@@ -1271,7 +1271,7 @@ class AppState extends State<AgroutApp> {
     add('Other:', Colors.cyan);
     add('  [p]  Port configuration panel');
     add('  [l]  Open login URL (paste API key)');
-    if (_updateTag != null) add('  [Shift+U]  Update to v$_updateTag (stops the bridge)');
+    if (_updateTag != null) add('  [Shift+U]  Update to $_updateTag (stops the bridge)');
     add('  [h]  Help');
     add('  [q]  Quit');
 
@@ -1306,15 +1306,12 @@ class AppState extends State<AgroutApp> {
     setState(() {});
   }
 
-  /// Perform the update: stop the proxy (release the port), spawn a detached
-  /// `agrout-bridge update` child that inherits stdout so its progress prints
-  /// to the terminal after the TUI exits, then shut the TUI down cleanly.
-  /// `shutdownApp()` restores the terminal before exit, so the child's output
-  /// lands on a healthy screen (the same flow as running `update` by hand).
+  /// Perform the update: spawn a detached `agrout-bridge update` child that
+  /// inherits stdout so its progress prints on the restored terminal, then
+  /// shut the TUI down cleanly. `stop()` is deliberately NOT awaited: with an
+  /// active SSE stream it can hang, which freezes the TUI before shutdown.
+  /// The process exit lets the OS reap the listener anyway.
   Future<void> _doUpdate() async {
-    await _proxy.stop();
-    stdout.writeln('agrout-bridge v$bridgeVersion -> v$_updateTag, updating...');
-    stdout.flush();
     try {
       Process.start(
         Platform.resolvedExecutable,
@@ -1322,9 +1319,9 @@ class AppState extends State<AgroutApp> {
         mode: ProcessStartMode.detachedWithStdio,
       );
     } catch (e) {
-      stdout.writeln('Could not launch update automatically.');
-      stdout.writeln('Run this manually:  agrout-bridge update');
-      stdout.flush();
+      // Rare (e.g. executable not spawnable). Still exit, the user can run
+      // `agrout-bridge update` manually; log it so it shows in the next run.
+      LogStore.error('Update spawn failed: $e');
     }
     shutdownApp(0);
   }
@@ -1337,7 +1334,7 @@ class AppState extends State<AgroutApp> {
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Text('Update Available!', style: TextStyle(fontWeight: FontWeight.bold, color: amber)),
         const SizedBox(height: 1),
-        Text('agrout-bridge v$bridgeVersion -> v$_updateTag'),
+        Text('agrout-bridge v$bridgeVersion -> $_updateTag'),
         const SizedBox(height: 1),
         const Text('The bridge will be closed and updated.'),
         const SizedBox(height: 1),
