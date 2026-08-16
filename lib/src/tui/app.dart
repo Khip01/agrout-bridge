@@ -29,16 +29,10 @@ class AgroutApp extends StatefulComponent {
   final ConfigStore configStore;
   final ServerController proxyServer;
 
-  /// Called by the TUI when the user confirms an update. Invoked from the
-  /// same call that then closes the TUI via [TerminalBinding.shutdown], so
-  /// the host (main) can print update instructions after `runApp` returns.
-  final void Function(String tag)? onUpdateRequested;
-
   AgroutApp({
     required this.profileStore,
     required this.configStore,
     required this.proxyServer,
-    this.onUpdateRequested,
   });
 
   @override
@@ -255,6 +249,11 @@ class AppState extends State<AgroutApp> {
       return false;
     }
     if (_panel == _Panel.updateConfirm) {
+      if (e.logicalKey == LogicalKey.keyC && !e.isControlPressed) {
+        unawaited(Clipboard.copy('agrout-bridge update'));
+        _setStatus('Copied update command to clipboard', duration: 3);
+        return true;
+      }
       if (e.logicalKey == LogicalKey.keyY || e.logicalKey == LogicalKey.enter) {
         unawaited(_doUpdate());
         return true;
@@ -1041,9 +1040,11 @@ class AppState extends State<AgroutApp> {
     if (_panel != _Panel.main) {
       final hint = _panel == _Panel.login
           ? '[c] copy URL | [Esc] close'
-          : _panel == _Panel.deleteConfirm || _panel == _Panel.updateConfirm
+          : _panel == _Panel.deleteConfirm
               ? '[y] confirm  [n] cancel'
-              : '[Esc] back';
+              : _panel == _Panel.updateConfirm
+                  ? '[c] copy cmd   [y] close   [n] back'
+                  : '[Esc] back';
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 1),
         child: Text(' $hint', style: base),
@@ -1317,22 +1318,12 @@ class AppState extends State<AgroutApp> {
     setState(() {});
   }
 
-  /// Perform the update: spawn a detached `agrout-bridge update` child that
-  /// inherits stdout so its progress prints on the restored terminal, then
-  /// shut the TUI down cleanly. `stop()` is deliberately NOT awaited: with an
-  /// active SSE stream it can hang, which freezes the TUI before shutdown.
-  /// The process exit lets the OS reap the listener anyway.
-  /// Confirm the update: notify the host via [AgroutApp.onUpdateRequested] and
-  /// close only the TUI (not the process) using [TerminalBinding.shutdown],
-  /// which restores the terminal without calling `exit()`. `runApp()` then
-  /// returns in `main.dart`, where the update instructions are printed and
-  /// the process exits normally. `_proxy.stop()` is bounded by a timeout so
-  /// an active SSE stream can never freeze the shutdown.
-  /// Confirm the update: notify the host via [AgroutApp.onUpdateRequested] and
-  /// close only the TUI (not the process) using [TerminalBinding.shutdown],
-  /// which restores the terminal without calling `exit()`. `runApp()` then
-  /// returns in `main.dart`, where the update instructions are printed and
-  /// the process exits normally.
+  /// Confirm the update: cancel every app timer, stop the proxy with a
+  /// bounded timeout, then close only the TUI (not the process) via
+  /// [TerminalBinding.shutdown], which restores the terminal without calling
+  /// `exit()`. `runApp()` returns in `main.dart`, where the process exits
+  /// cleanly. No instruction is printed at exit: the user already copied the
+  /// `agrout-bridge update` command from the confirm dialog with `[c]`.
   ///
   /// [TerminalBinding.shutdown] leaves the alternate screen and clears it.
   /// Any reactive timer still scheduled (the 1s refresh, the sign-in expiry)
@@ -1342,7 +1333,6 @@ class AppState extends State<AgroutApp> {
   /// happen. `_proxy.stop()` is also bounded so an active SSE stream can never
   /// freeze the shutdown.
   Future<void> _doUpdate() async {
-    final tag = _updateTag;
     _pageRefreshTimer?.cancel();
     _statusTimer?.cancel();
     _loginExpiry?.cancel();
@@ -1351,9 +1341,6 @@ class AppState extends State<AgroutApp> {
     } catch (_) {
       // Port release is best-effort; the process exits right after, and the
       // OS reaps the listener.
-    }
-    if (tag != null) {
-      component.onUpdateRequested?.call(tag);
     }
     TerminalBinding.instance.shutdown();
   }
@@ -1368,11 +1355,12 @@ class AppState extends State<AgroutApp> {
         const SizedBox(height: 1),
         Text('agrout-bridge v$bridgeVersion -> $_updateTag'),
         const SizedBox(height: 1),
-        const Text('The TUI will close, then you run:'),
+        const Text('The TUI will close. Then run:'),
         const SizedBox(height: 1),
-        const Text('  agrout-bridge update'),
+        const Text('  agrout-bridge update', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 1),
-        const Text('[y] Yes  [n] No'),
+        Text('[c] copy command    [y] close TUI    [n] back',
+            style: const TextStyle(color: Color(0xFFD0D0D0))),
       ]),
     ));
   }

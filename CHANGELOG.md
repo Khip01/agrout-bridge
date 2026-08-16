@@ -4,27 +4,32 @@
 
 ### Fix
 
-- **TUI update now closes only the TUI, then tells the user to run
-  `agrout-bridge update`.**
-  - The earlier attempts were broken twice. The first version did a plain
-    `await _proxy.stop()`, which blocks while an SSE stream is active, so
-    the TUI froze. The second version called `shutdownApp(0)`, which maps to
-    `exit(0)` in nocterm, killing the whole process and relying on an
-    unreliable detached child.
-  - Now `[Shift+U]` confirm calls `_proxy.stop()` with a 2s timeout (can
-    never hang), cancels every app timer (page refresh / status / login
-    expiry) so no stray frame repaints the restored main buffer, invokes
-    `AgroutApp.onUpdateRequested(tag)`, then uses
-    `TerminalBinding.instance.shutdown()`, which restores the terminal
+- **TUI update closes only the TUI; the command is copied, not printed.
+  Earlier attempts were broken twice.**
+  - The first version did a plain `await _proxy.stop()`, which blocks while
+    an SSE stream is active, so the TUI froze. The second version called
+    `shutdownApp(0)`, which maps to `exit(0)` in nocterm and killed the
+    whole process.
+  - Now the confirm dialog shows `agrout-bridge update` and `[c]` copies it
+    to the clipboard. `[y]` calls `_proxy.stop()` with a 2s timeout (never
+    hangs), cancels every app timer (page refresh / status / login expiry)
+    so no stray frame repaints the restored main buffer, then uses
+    `TerminalBinding.instance.shutdown()` which restores the terminal
     WITHOUT exiting the process. `runApp()` returns in `main.dart`, which
-    prints a clear instruction and exits normally:
-    `agrout-bridge update`. The TUI no longer attempts an in-process update.
-- **Update notice now only prints for headless mode.** The startup notice
-  previously ran `await fetchLatestTag()` in plain mode too, which added a
-  network round-trip before the TUI opened (perceived as a delay) and
-  printed "Update available" above the TUI. TUI mode relies on its own
-  non-blocking `_checkForUpdate()` badge; only `--server` prints the notice
-  before its "running headless" banner.
+    then exits cleanly; no instruction is printed for TUI mode because the
+    user already copied it.
+- **Update check no longer delays or clutters TUI startup.** The startup
+  check previously ran `await fetchLatestTag()` in plain mode too, adding a
+  network round-trip before the TUI opened (perceived as delay) and printing
+  "Update available" above the TUI. TUI mode now relies on its own
+  non-blocking `_checkForUpdate()` badge; model refresh is also moved to the
+  background so `agrout-bridge run` opens immediately.
+- **Headless checks for updates in the background after the bridge
+  starts.** `--server` no longer prints the notice before its "running
+  headless" banner. The bridge starts first; the check runs behind the
+  scenes and, when a newer version exists, writes to the activity log and
+  prints the "stop the bridge first, then run `agrout-bridge update`"
+  instruction.
 - **In-TUI update no longer freezes or prints a doubled version.**
   - The confirm dialog and update notice showed `-> vv0.1.21`: `_updateTag`
     already carries the leading `v` (it is the GitHub tag), so the extra `v`

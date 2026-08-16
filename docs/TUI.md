@@ -129,16 +129,23 @@ When a newer stable version exists, the header shows an
 `Update Available!` badge and the footer adds a `[Shift+U]` key.
 Pressing it opens a confirm dialog:
 
+- `[c]` copies the update command (`agrout-bridge update`) to the clipboard.
 - `[y]` closes the TUI (via nocterm's `TerminalBinding.shutdown()`, which
-  restores the terminal without exiting the process) and prints the update
-  instruction:
-  ```
-  agrout-bridge vX.Y.Z -> vX.Y.Z+1
-  Update the bridge with:
-    agrout-bridge update
-  ```
+  restores the terminal without exiting the process) and exits cleanly. No
+  instruction is printed afterwards: the command is already in your
+  clipboard.
 - `[n]` / `Esc` returns to the main panel.
 
-The bridge does not run the update itself: `agrout-bridge update` is a
-standalone command that survives the TUI's exit, so the binary is replaced
-from a stable process. The TUI never attempts an in-process update.
+The bridge does not run the update itself. After the TUI exits, paste/run
+the copied command in your shell:
+
+```
+agrout-bridge update
+```
+
+The standalone command replaces the binary from a stable process, then you
+can start the bridge again with `agrout-bridge run`.
+
+Headless (`--server`) mode checks for updates in the background after the
+bridge starts and logs the "stop the bridge first, then run
+`agrout-bridge update`" instruction if a newer version exists.

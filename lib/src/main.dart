@@ -81,9 +81,11 @@ void _loadStores(ProfileStore profiles, ConfigStore config) {
   }
 }
 
-/// Quietly check for an update (1h cached lookup) and print a notice before
-/// the bridge starts, so both headless and TUI operators see it. Best-effort:
-/// failures are silently ignored.
+/// Quietly check for an update (1h cached lookup). Headless-only: prints the
+/// notice to stdout AFTER the bridge is already running (called in the
+/// background, never blocks the banner), because headless stdout is a normal
+/// terminal. TUI mode does not call this; it surfaces the update via its own
+/// non-blocking badge and dialog instead. Best-effort: failures are silent.
 Future<void> _printUpdateNoticeIfAny() async {
   try {
     final latest = await Updater().fetchLatestTag();
@@ -92,13 +94,13 @@ Future<void> _printUpdateNoticeIfAny() async {
     if (cur != null && nxt != null && Updater.compareSemver(nxt, cur) > 0) {
       stdout.writeln();
       stdout.writeln('Update available: v$bridgeVersion -> $latest');
-      stdout.writeln('Run `agrout-bridge update` to install it, or press [Shift+U] in the TUI.');
+      stdout.writeln('To update, stop this bridge first, then run:');
+      stdout.writeln('  agrout-bridge update');
       stdout.writeln();
-      stdout.flush();
-      LogStore.info('Update available: v$bridgeVersion -> $latest');
+      LogStore.info('Update available: v$bridgeVersion -> $latest (stop bridge, then run `agrout-bridge update`)');
     }
   } catch (_) {
-    // Best-effort; never block startup on a network blip.
+    // Best-effort; never fail startup on a network blip.
   }
 }
 
@@ -114,14 +116,12 @@ Future<void> _runCommand(List<String> args) async {
   LogStore.init();
   final controller = ServerController(profiles: profiles, configStore: config);
   final boundPort = await controller.start();
-  await controller.refreshModels();
 
   if (isServer) {
-    // Headless: print the update notice (best-effort, 1h cache) before the
-    // "running headless" banner. TUI mode does NOT call this: it would add a
-    // network round-trip to startup, and the TUI already surfaces an
-    // "Update Available!" badge via its own non-blocking check.
-    await _printUpdateNoticeIfAny();
+    // Headless: fetch the model list before the running banner, then show the
+    // update check in the background (never blocks the banner).
+    await controller.refreshModels();
+    unawaited(_printUpdateNoticeIfAny());
     LogStore.info('agrout-bridge headless started on '
         '${config.config.listenAddress}:$boundPort');
     stdout.writeln('agrout-bridge running headless on http://${config.config.listenAddress}:$boundPort');
@@ -144,34 +144,22 @@ Future<void> _runCommand(List<String> args) async {
   }
 
   // TUI mode.
-  String? requestedUpdateTag;
+  // Refresh the model cache in the background: do NOT await it here, or the
+  // TUI would stall waiting on the agentrouter round-trip before opening.
+  unawaited(controller.refreshModels());
   final app = AgroutApp(
     profileStore: profiles,
     configStore: config,
     proxyServer: controller,
-    onUpdateRequested: (tag) {
-      requestedUpdateTag = tag;
-    },
   );
   await runApp(app);
   // Normal quit path: the TUI calls `shutdownApp(0)` which asks nocterm to
   // restore the terminal and exit the process; `runApp` does not return.
   //
   // Update path: the TUI uses `TerminalBinding.shutdown()` (no `exit()`), so
-  // `runApp` returns here with the process still alive and the terminal
-  // restored. Print the update instruction, then exit normally.
-  if (requestedUpdateTag != null) {
-    stdout.writeln();
-    stdout.writeln('Update available: v$bridgeVersion -> $requestedUpdateTag');
-    stdout.writeln('To install the update, run this command:');
-    stdout.writeln();
-    stdout.writeln('  agrout-bridge update');
-    stdout.writeln();
-    stdout.writeln('After it finishes, start the bridge again with:');
-    stdout.writeln('  agrout-bridge run');
-    stdout.writeln();
-    stdout.flush();
-  }
+  // `runApp` returns here with the process still alive. The user already
+  // copied the `agrout-bridge update` command from the dialog, so just exit
+  // cleanly.
   exit(0);
 }
 

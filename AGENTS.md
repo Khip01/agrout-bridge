@@ -99,11 +99,19 @@ agrout-bridge/
 
 ## CLI contract
 
-> TUI update flow: `[Shift+U]` closes the TUI (via
-> `TerminalBinding.instance.shutdown()`, which restores the terminal without
-> exiting the process), then `main.dart` prints
-> `agrout-bridge update` and exits. The TUI never runs the update in-process;
-> the standalone command replaces the binary from a stable process.
+> TUI update flow: `[Shift+U]` opens a confirm dialog showing
+> `agrout-bridge update`. `[c]` copies that command to the clipboard.
+> `[y]` closes the TUI via `TerminalBinding.instance.shutdown()` (restores the
+> terminal without exiting the process) and `main.dart` then exits cleanly; no
+> instruction is printed for TUI mode because the user already copied it. The
+> TUI never runs the update in-process; the standalone command replaces the
+> binary from a stable process.
+>
+> Headless (`--server`) update flow: the startup notice is NOT printed before
+> the running banner. The bridge starts first, and the update check runs in
+> the background; when a newer version exists it is written to the activity
+> log (`LogStore`) and printed to stdout with the "stop the bridge first,
+> then run `agrout-bridge update`" instruction.
 
 ```bash
 agrout-bridge run                        # TUI mode (auto-starts proxy)
