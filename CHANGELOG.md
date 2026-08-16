@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.17 (2026-08-16)
+## v0.1.18 (2026-08-16)
 
 ### Improve
 
@@ -15,6 +15,8 @@
 - **Delete profile from the TUI.** `Shift+D` (Profile page only) opens a
   Y/N confirmation dialog; confirming removes the profile, fixes the active
   id if it pointed at the deleted key, and refreshes.
+
+## v0.1.17 (2026-08-16)
 
 ### Changed
 
