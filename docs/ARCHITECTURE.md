@@ -85,7 +85,7 @@ Upstream ──> 200 text/event-stream    <──  │
 Client  <──  200 (or 4xx / 5xx)       <──
 ```
 
-The proxy never translates between protocols — AgentRouter speaks both
+The proxy never translates between protocols. AgentRouter speaks both
 Anthropic Messages and OpenAI Chat Completions natively, so each route
 is a straight pass-through with the spoof + WAF layer in front.
 
@@ -130,7 +130,7 @@ is best handled as a per-profile cache:
    profile and persists.
 4. The profile store writes the updated map back to `profiles.json` on
    every `upsert`, so a restart immediately resumes with the rotated
-   cookies — no extra warmup needed.
+   cookies, so no extra warmup is needed.
 
 ## Spoof header invariants
 

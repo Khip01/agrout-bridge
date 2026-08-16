@@ -57,12 +57,49 @@ In the TUI:
 - Press `[1] [2] [3] [4]` to switch pages
 - Press `[Ctrl+L]` to toggle the log side panel
 
+## Client configuration (OpenCode)
+
+Point any OpenAI-/Anthropic-compatible client at `http://127.0.0.1:8318/v1`
+and use a placeholder `apiKey`. The bridge injects the active profile's
+real key. The `context` / `input` limits shown below are
+**research-recommended** (a ~5-10% margin below the measured
+agentrouter.org ceiling, so the client auto-compacts before the gateway
+returns `504`). Other clients (Claude Code, Cursor, Continue, ...) and the
+full per-model probe data are in
+[`docs/INSTALL.md`](docs/INSTALL.md) and
+[`docs/CONTENT-FILTER.md`](docs/CONTENT-FILTER.md).
+
+```jsonc
+// opencode.jsonc: the "provider" entry
+"AgentRouter": {
+  "npm": "@ai-sdk/openai-compatible",
+  "name": "AgentRouter",
+  "options": {
+    "baseURL": "http://127.0.0.1:8318/v1",
+    "apiKey": "anything"
+  },
+  "models": {
+    "gpt-5.6-sol": {
+      "name": "gpt-5.6-sol",
+      "limit": { "context": 420000, "input": 420000, "output": 8192 }
+    },
+    "claude-opus-5": {
+      "name": "claude-opus-5",
+      "limit": { "context": 900000, "input": 900000, "output": 8192 }
+    }
+  }
+}
+```
+
+For the Anthropic-compatible path use `"npm": "@ai-sdk/anthropic"` with
+the same `baseURL` and limits (see `docs/INSTALL.md`).
+
 ## Documentation
 
-- [Install](docs/INSTALL.md) — install options, platform support
-- [API reference](docs/API-REFERENCE.md) — proxy endpoints, client configs
-- [TUI](docs/TUI.md) — pages, key bindings
-- [Architecture](docs/ARCHITECTURE.md) — file structure, proxy flow
+- [Install](docs/INSTALL.md): install options, platform support
+- [API reference](docs/API-REFERENCE.md): proxy endpoints, client configs
+- [TUI](docs/TUI.md): pages, key bindings
+- [Architecture](docs/ARCHITECTURE.md): file structure, proxy flow
 
 ## License
 

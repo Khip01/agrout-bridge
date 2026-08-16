@@ -2,8 +2,8 @@
 ///
 /// Owns three concerns:
 /// 1. The Claude Code header fingerprint that the upstream client-detection
-///    gate enforces — see `spoof.dart`.
-/// 2. The WAF cookie jar (`acw_tc` and rotated siblings) — see `waf.dart`.
+///    gate enforces (see `spoof.dart`).
+/// 2. The WAF cookie jar (`acw_tc` and rotated siblings), see `waf.dart`.
 ///    The jar is passed in by the caller so the same cookies can be reused
 ///    across requests and persisted into the active profile on success.
 /// 3. Auth header injection: chat keys go into `Authorization: Bearer` or
@@ -86,7 +86,7 @@ class AgentRouterClient {
   ///
   /// The upstream often returns a 3xx redirect or 400/404 on this root path
   /// when the edge rejects the visitor fingerprint; we still want the
-  /// `Set-Cookie` from that response. Don't gate on the status code here —
+  /// `Set-Cookie` from that response. Don't gate on the status code here.
   /// callers should treat the cookie jar as the result and retry real API
   /// calls.
   Future<WarmupResult> warmup({Map<String, String>? existingCookies}) async {
@@ -203,7 +203,7 @@ class AgentRouterClient {
 
   // ── High-level endpoints ────────────────────────────────────────────
 
-  /// `GET /v1/models` — returns the list of model ids the chat key can use.
+  /// `GET /v1/models` returns the list of model ids the chat key can use.
   Future<List<String>> fetchModels({
     required String apiKey,
     Map<String, String>? cookies,
@@ -222,7 +222,7 @@ class AgentRouterClient {
         .toList(growable: false);
   }
 
-  /// `GET /v1/dashboard/billing/subscription` — the OpenAI-style billing
+  /// `GET /v1/dashboard/billing/subscription`: the OpenAI-style billing
   /// endpoint that New API panels expose to a plain API key (no session
   /// token needed). Returns quota limits (soft_limit_usd / hard_limit_usd).
   Future<Map<String, dynamic>> fetchBillingSubscription({
@@ -234,7 +234,7 @@ class AgentRouterClient {
     );
   }
 
-  /// `GET /v1/dashboard/billing/usage?start_date&end_date` — OpenAI-style
+  /// `GET /v1/dashboard/billing/usage?start_date&end_date`: OpenAI-style
   /// usage endpoint that New API panels expose to a plain API key. Returns
   /// `total_usage` (aggregate) and per-date `daily_costs` when present.
   Future<Map<String, dynamic>> fetchBillingUsage({
@@ -248,7 +248,7 @@ class AgentRouterClient {
     );
   }
 
-  /// `POST /api/user/login` — warmup the cookie jar first, then carry those
+  /// `POST /api/user/login`: warmup the cookie jar first, then carry those
   /// cookies into the login POST so the upstream CSRF / first-party checks
   /// see a normal visitor session.
   Future<LoginResult> login({
@@ -305,7 +305,7 @@ class AgentRouterClient {
     );
   }
 
-  /// `GET /api/status` — site-level OAuth configuration. AgentRouter only
+  /// `GET /api/status`: site-level OAuth configuration. AgentRouter only
   /// supports provider sign-in (GitHub / LinuxDO / optional OIDC); there is
   /// no username+password registration, so the local sign-in flow must open
   /// the provider authorize URL instead of posting credentials.
@@ -326,7 +326,7 @@ class AgentRouterClient {
     return const {};
   }
 
-  /// `GET /api/oauth/state?mode=login` — returns the signed state token that
+  /// `GET /api/oauth/state?mode=login` returns the signed state token that
   /// must be carried into the provider authorize URL.
   Future<String?> fetchOauthState() async {
     final raw = await send(

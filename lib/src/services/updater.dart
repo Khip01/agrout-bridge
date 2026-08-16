@@ -98,7 +98,7 @@ class Updater {
   ///
   /// Uses the **Tags API** (`/repos/.../tags`) rather than `/releases/latest`,
   /// because GitHub's `releases/latest` endpoint returns 404 when no release
-  /// object is marked `isLatest` — a known flakiness where every release in a
+  /// object is marked `isLatest`, a known flakiness where every release in a
   /// repo can report `isLatest == false` while all tags + assets are present.
   /// The Tags API is stable for any tagged release.
   ///

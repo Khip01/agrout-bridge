@@ -139,13 +139,20 @@ behavior.
 
 At large input sizes the gate no longer says `content-blocked`. It returns
 `HTTP 504` with an HTML error page after a stable ~123s, before any stream
-event:
+event. The numbers below were measured on `gpt-5.6-sol`:
 
-| System | History | Result | First event |
-|---|---|---|---|
-| AGENTS.md | ~425k tokens | 200 OK | 64s |
-| AGENTS.md | ~450k+ tokens | HTTP 504 | never |
-| AGENTS.md (stream) | ~450k+ tokens | HTTP 504 | never |
+| System | Model | History | Result | First event |
+|---|---|---|---|---|
+| AGENTS.md | gpt-5.6-sol | ~425k tokens | 200 OK | 64s |
+| AGENTS.md | gpt-5.6-sol | ~450k+ tokens | HTTP 504 | never |
+| AGENTS.md | gpt-5.6-sol (stream) | ~450k+ tokens | HTTP 504 | never |
+
+On `claude-opus-5` (measured 2026-08-16, budget pool restored) prefill is
+much faster and the gateway 504 does not appear before the model's own 1M
+context window: 998,593 input tokens returned 200 (first event at 61s),
+~1,018k returned 504 (137s), and ~1,046k was rejected by the model itself
+with HTTP 400 "Operation not allowed". See the recommended-limits table
+below for client settings.
 
 The 504 comes from the **upstream gateway**, not the bridge (the bridge
 only emits JSON errors with codes 502/503; the HTML body is upstream's).
@@ -163,11 +170,12 @@ Practical consequences:
   total input size vs prefill time.
 - **Adding dummy content lowers the ceiling.** Every token added to every
   request makes prefill slower and brings the 504 closer.
-- A **cold single request** that ships 450k tokens in one go hits the
-  ceiling. Real sessions grow incrementally: the older history is served
-  from upstream prompt cache (cheap prefill) and only the delta is
-  processed, which is why long sessions in practice reach far beyond the
-  cold-request ceiling.
+- A **cold single request** that ships everything in one go hits the
+  ceiling (for `gpt-5.6-sol` that is ~450k tokens; for `claude-opus-5` the
+  model's 1M window wins first). Real sessions grow incrementally: the
+  older history is served from upstream prompt cache (cheap prefill) and
+  only the delta is processed, which is why long sessions in practice reach
+  far beyond the cold-request ceiling.
 
 ## What raises a real-world ceiling (and what does not)
 
@@ -201,15 +209,22 @@ Measured and recommended values (OpenAI-compatible provider block in
 | Model | Measured ceiling (cold) | Recommended declared limit | Output |
 |---|---|---|---|
 | `gpt-5.6-sol` | **~432k** (1730-turn OK at 123s first event; 437k = 504) | context `420000`, input `420000` | `8192` |
-| `claude-opus-5` | not measurable while its budget pool is exhausted (402) | context `480000`, input `480000` | `8192` |
-| `claude-opus-4-8` | not measurable while its budget pool is exhausted (402) | context `480000`, input `480000` | `8192` |
+| `claude-opus-5` | **~998k** (OK at 61s first event; ~1.0M+ = 504 prefill or 400 Bedrock context limit) | context `900000`, input `900000` | `8192` |
+| `claude-opus-4-8` | not re-measured (same Anthropic/Bedrock family); assume the ~1.0M ceiling of `claude-opus-5` | context `900000`, input `900000` | `8192` |
 
 The recommended limit keeps a safety margin below the ceiling: the client
 starts auto-compaction while the request still fits, instead of the gateway
 returning 504. The `gpt-5.6-sol` cold ceiling of ~432k already produced its
 first stream event at 123s, right at the ~120s gateway timeout, so the
 declared 420k limit leaves a meaningful safety band for upstream load
-variation. Verify per model by sending a single large cold request and
+variation. The `claude-opus-5` ceiling measured on 2026-08-16 stops just
+under ~1.0M tokens: 998,593 actual prompt tokens returned 200 with the
+first event at 61s, ~1,018k hit the upstream 504 after 137s (prefill-time
+gateway limit), and ~1,046k was rejected by the Bedrock-backed model with
+HTTP 400 "Operation not allowed" (model context window). Claude-family
+clients should therefore declare ~900k to compact a comfortable margin
+before the model's 1M window, keeping the gateway prefill well under its
+timeout. Verify per model by sending a single large cold request and
 recording the largest size that returns 200 before 504; then set the
 declared limit ~5-10% below it.
 

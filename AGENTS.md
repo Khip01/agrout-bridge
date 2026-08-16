@@ -199,7 +199,8 @@ tarball.
 | `/v1/token` | GET | Return a static pass-through token |
 | `/info` | GET | Bridge info + config |
 
-OpenCode (Anthropic compatible) configuration:
+OpenCode (Anthropic compatible) configuration. The `limit` block follows
+the research-recommended values in `docs/CONTENT-FILTER.md`:
 
 ```jsonc
 "AgentRouter": {
@@ -210,8 +211,13 @@ OpenCode (Anthropic compatible) configuration:
     "apiKey": "anything"
   },
   "models": {
+    "claude-opus-5": {
+      "name": "claude-opus-5",
+      "limit": { "context": 900000, "input": 900000, "output": 8192 }
+    },
     "claude-opus-4-8": {
-      "name": "claude-opus-4-8"
+      "name": "claude-opus-4-8",
+      "limit": { "context": 900000, "input": 900000, "output": 8192 }
     }
   }
 }
@@ -228,12 +234,21 @@ OpenCode (OpenAI compatible) configuration:
     "apiKey": "anything"
   },
   "models": {
-    "claude-opus-4-8": {
-      "name": "claude-opus-4-8"
+    "gpt-5.6-sol": {
+      "name": "gpt-5.6-sol",
+      "limit": { "context": 420000, "input": 420000, "output": 8192 }
+    },
+    "claude-opus-5": {
+      "name": "claude-opus-5",
+      "limit": { "context": 900000, "input": 900000, "output": 8192 }
     }
   }
 }
 ```
+
+Per-client configs for Claude Code, Cursor, Continue and other
+OpenAI-compatible tools live in `docs/INSTALL.md`. Measured ceilings and
+the methodology behind the numbers are in `docs/CONTENT-FILTER.md`.
 
 ## Handling upstream content-blocked
 
@@ -241,7 +256,7 @@ When OpenCode/Claude Code sessions grow very large (common with big
 codebases), agentrouter.org's input content filter can reject the request
 with `402 Budget pool quota has been exhausted` or a soft
 `content-blocked` / `sensitive_words` mid-stream line. The bridge
-mitigates the most common false positives before forwarding — see
+mitigates the most common false positives before forwarding (see
 `CHANGELOG.md` v0.1.6 and `docs/ARCHITECTURE.md` (spoof invariants):
 
 1. **System-prompt stripping is OFF by default.** Live probing of the
@@ -285,7 +300,7 @@ a bridge bug. The client should declare a context/input limit below the
 measured ceiling so it auto-compacts before the 504 (see
 `docs/CONTENT-FILTER.md` for measured values per model). If you still hit
 a hard `content-blocked`, it is an upstream policy decision, not a bridge
-bug — request a budget-policy/quota adjustment on your AgentRouter account
+bug. Request a budget-policy/quota adjustment on your AgentRouter account
 or route Claude traffic directly via a non-AgentRouter provider.
 
 ## Port
@@ -384,6 +399,6 @@ When making changes to this project, the AI agent must:
    The release workflow reads this field to name the npm tarball
    (`agrout-bridge-vX.Y.Z.tgz`) and to validate the `--version` intercept in
    `bin/agrout-bridge.js`. A mismatched version produces a tarball that does
-   not match its tag — do not skip this.
+   not match its tag. Do not skip this.
 4. Never commit API keys, session tokens, or any `~/.config/agrout-bridge/`
    artifact. `.gitignore` must cover them.

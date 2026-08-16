@@ -2,6 +2,18 @@
 
 ## v0.1.15 (2026-08-16)
 
+### Docs
+
+- **Measured the cold context ceiling for `claude-opus-5`.** Once the
+  budget pool was no longer exhausted, live probing (2026-08-16) found the
+  ceiling stops just under ~1.0M tokens: 998,593 input tokens returned 200
+  with the first event at 61s, ~1,018k hit the upstream 504 after 137s
+  (prefill-time gateway limit), and ~1,046k was rejected by the
+  Bedrock-backed model with HTTP 400 "Operation not allowed" (model
+  context window). The recommended declared limit for the Claude family is
+  updated from a placeholder `480000` to `900000` (context/input) in
+  `docs/CONTENT-FILTER.md`.
+
 ### Fix
 
 - **Headless mode never wrote the activity log.** `LogStore.init()` was only

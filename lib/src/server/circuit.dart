@@ -1,7 +1,7 @@
 /// Circuit breaker + per-model health tracking for the upstream AgentRouter
 /// gateway. The breaker is conservative (it does NOT black-hole requests on
 /// a per-model 429 throttle, since the model is still healthy at the network
-/// level — the client just falls back via 9Router / OpenCode).
+/// level, the client just falls back via 9Router / OpenCode).
 library;
 
 /// A small per-model success / failure counter used to decide whether to
@@ -43,7 +43,7 @@ class _Failure {
 }
 
 /// Open / closed circuit breaker that trips on consecutive final 5xx and
-/// transport errors. 429 responses do NOT trip the breaker — they're a
+/// transport errors. 429 responses do NOT trip the breaker; they're a
 /// per-model throttle, the model itself is still reachable.
 class CircuitBreaker {
   static const int _failureThreshold = 5;

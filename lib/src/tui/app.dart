@@ -297,7 +297,7 @@ class AppState extends State<AgroutApp> {
       return true;
     }
 
-    // Model list navigation — only on the Models page. Mirrors
+    // Model list navigation, only on the Models page. Mirrors
     // commandcode-bridge: up/down moves the highlight, Enter copies the id.
     if (_infoPage == _InfoPage.models) {
       final models = _proxy.modelIds;
@@ -606,7 +606,7 @@ class AppState extends State<AgroutApp> {
       return [
         Padding(
           padding: const EdgeInsets.all(2),
-          child: Text('No models yet — press [r] to fetch',
+          child: Text('No models yet, press [r] to fetch',
               style: TextStyle(color: Colors.grey)),
         ),
       ];
@@ -1097,14 +1097,14 @@ class AppState extends State<AgroutApp> {
           _loginError = null;
           _loginMessage = 'Login successful${outcome.username != null ? " as ${outcome.username}" : ""}';
           setState(() {});
-          _setStatus('API key validated — login successful', duration: 4);
+          _setStatus('API key validated, login successful', duration: 4);
           LogStore.success('Login successful${outcome.username != null ? " as ${outcome.username}" : ""}');
         } else {
           _loginState = _LoginState.failed;
           _loginError = outcome.message ?? 'token rejected by agentrouter.org';
           _loginMessage = 'Login failed: ${_loginError}';
           setState(() {});
-          _setStatus('Login failed — see dialog for reason', duration: 4);
+          _setStatus('Login failed, see dialog for reason', duration: 4);
           LogStore.warning('Login failed: ${_loginError}');
         }
       });
@@ -1122,7 +1122,7 @@ class AppState extends State<AgroutApp> {
       _loginError = 'Failed to start login server: $e';
       _loginMessage = 'Login failed: ${_loginError}';
       setState(() {});
-      _setStatus('Login server error — see dialog', duration: 4);
+      _setStatus('Login server error, see dialog', duration: 4);
       LogStore.error('Login server failed: $e');
     }
   }

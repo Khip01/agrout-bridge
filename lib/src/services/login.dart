@@ -183,7 +183,7 @@ class LoginFlow {
 
     // Best-effort: if this token is also a session token, enrich account info.
     // A dashboard API key will get `success:false` here (session-only
-    // endpoint) — that is not a login failure, so leave accountInfo null.
+    // endpoint). That is not a login failure, so leave accountInfo null.
     Map<String, dynamic>? info;
     String? user;
     try {
@@ -243,7 +243,7 @@ button { margin-top:12px; width:100%; padding:10px; background:#2a6df4; color:#f
 .note { color:#7c8693; font-size:12px; margin-top:14px; }
 .err { color:#ff7777; font-size:13px; margin-top:10px; }
 </style></head><body><main>
- <h1>agrout-bridge — AgentRouter sign-in</h1>
+ <h1>agrout-bridge | AgentRouter sign-in</h1>
 <p>AgentRouter accounts are created through GitHub or LinuxDO OAuth only.
 Open a provider sign-in below (opens in a new tab), then paste the resulting
 session token into the field, or paste your API key (`sk-...`) from the
