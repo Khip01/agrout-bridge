@@ -29,7 +29,18 @@ class Updater {
   static const _repo = 'agrout-bridge';
   static const _apiBase = 'https://api.github.com';
   static const _dlBase = 'https://github.com/$_owner/$_repo/releases/download';
-  static const _cacheTtlMs = 60 * 60 * 1000; // 1 hour
+
+  /// `latest.json` mirrors the newest stable release tag. It is served from
+  /// CDN endpoints (jsDelivr, then raw.githubusercontent.com) instead of the
+  /// rate-limited GitHub API, so the check can refresh quickly and reflect
+  /// release deletions without hitting API limits.
+  static const _latestJsonSources = [
+    'https://cdn.jsdelivr.net/gh/$_owner/$_repo@main/latest.json',
+    'https://raw.githubusercontent.com/$_owner/$_repo/main/latest.json',
+  ];
+
+  /// Short TTL so removals/re-rolls show up quickly.
+  static const _cacheTtlMs = 5 * 60 * 1000; // 5 minutes
 
   /// Suffixes that mark a tag as a prerelease (filtered out by the updater).
   static const _prereleaseMarkers = [
@@ -94,24 +105,27 @@ class Updater {
     'User-Agent': 'agrout-bridge-cli',
   };
 
-  /// Fetch the latest stable tag from GitHub.
+  /// Fetch the latest stable tag for the bridge.
   ///
-  /// Uses the **Tags API** (`/repos/.../tags`) rather than `/releases/latest`,
-  /// because GitHub's `releases/latest` endpoint returns 404 when no release
-  /// object is marked `isLatest`, a known flakiness where every release in a
-  /// repo can report `isLatest == false` while all tags + assets are present.
-  /// The Tags API is stable for any tagged release.
-  ///
-  /// Prerelease tags (`v*.*.*-rc`, `-beta`, `-alpha`, ...) are filtered out;
-  /// the highest semver among the stable tags wins.
+  /// Resolution order:
+  ///   1. `latest.json` from a CDN (jsDelivr), falling back to
+  ///      raw.githubusercontent.com. These are plain file CDNs, not the
+  ///      rate-limited GitHub API, so fetching is cheap and the tag reflects
+  ///      the latest *published* release. Deleting a release only requires
+  ///      updating `latest.json` (or it naturally stays behind and the CDN
+  ///      cache expires), so the badge is dynamic instead of being pinned to
+  ///      a long TTL dead cache entry.
+  ///   2. The GitHub **Tags API** (`/repos/.../tags`), which is deliberately
+  ///      used over `/releases/latest` because releases/latest is flaky (404s
+  ///      when no release object is marked `isLatest`) while tags + assets
+  ///      are always present. Prerelease tags are filtered; the highest
+  ///      stable semver wins.
   ///
   /// When [forceRefresh] is true, the local cache is bypassed and updated on
   /// success. The explicit `update` command always passes `forceRefresh: true`
-  /// so it always reflects the real upstream truth, never a 1h-stale cache
-  /// entry (the original "Already up to date after a release" bug). On
-  /// network or API failure we degrade to the local cache rather than
-  /// hard-failing, so an offline/throttled user still gets a sensible
-  /// "already up to date" instead of "Failed to check latest version".
+  /// so it always reflects real upstream truth, never a stale cache entry.
+  /// On network or CDN failure we fall back down the chain and, finally, to
+  /// the local cache rather than hard-failing.
   Future<String?> fetchLatestTag({bool forceRefresh = false}) async {
     if (!forceRefresh) {
       final cached = _readCache();
@@ -122,14 +136,48 @@ class Updater {
       _writeCache(tag);
       return tag;
     }
-    // API/network failure: degrade gracefully to the cache so callers can
-    // still report last-known state instead of erroring.
+    // CDN/API/network failure: degrade gracefully to the cache so callers
+    // can still report last-known state instead of erroring.
     return _readCache();
   }
 
-  /// Query the GitHub Tags API and return the highest stable semver tag, or
-  /// `null` if it could not be determined (network error, non-200, empty).
+  /// Determine the latest stable tag: try the CDN `latest.json` first, then
+  /// the GitHub Tags API as a fallback. Returns `null` when nothing could be
+  /// determined (network error, non-200, empty).
   Future<String?> _fetchLatestStableTag() async {
+    final fromFile = await _fetchLatestTagFromCdns();
+    if (fromFile != null) return fromFile;
+    return _fetchLatestFromTagsApi();
+  }
+
+  /// Try each `latest.json` CDN source and return a semver-valid tag, or
+  /// `null` if every source failed.
+  Future<String?> _fetchLatestTagFromCdns() async {
+    for (final url in _latestJsonSources) {
+      try {
+        final r = await _httpFetch(url, const {
+          'Accept': 'application/json',
+          'User-Agent': 'agrout-bridge-cli',
+        });
+        if (r.statusCode != 200) continue;
+        final data = jsonDecode(r.body);
+        if (data is! Map<String, dynamic>) continue;
+        final rawTag = (data['tag'] ?? data['version']) as String?;
+        if (rawTag == null || _isPrereleaseTag(rawTag)) continue;
+        final parsed = parseSemver(rawTag);
+        if (parsed == null) continue;
+        return rawTag;
+      } catch (_) {
+        // Try the next source.
+        continue;
+      }
+    }
+    return null;
+  }
+
+  /// Query the GitHub Tags API and return the highest stable semver tag, or
+  /// `null` if it could not be determined.
+  Future<String?> _fetchLatestFromTagsApi() async {
     try {
       final r = await _httpFetch('$_apiBase/repos/$_owner/$_repo/tags?per_page=100', _apiHeaders);
       if (r.statusCode != 200) return null;

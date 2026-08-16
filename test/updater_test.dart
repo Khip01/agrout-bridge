@@ -36,6 +36,17 @@ void main() {
     };
   }
 
+  /// Stub serving a `latest.json` CDN source. Non-latest.json URLs 404,
+  /// matching a stub where the Tags API fallback is irrelevant.
+  UpdaterHttpFetch stubCdn(String latestJson, {int status = 200}) {
+    return (String url, Map<String, String> headers) async {
+      if (url.contains('latest.json')) {
+        return (statusCode: status, body: latestJson);
+      }
+      return (statusCode: 404, body: '');
+    };
+  }
+
   void seedCache(String tag, {int ageMs = 0}) {
     File(cachePath).writeAsStringSync(jsonEncode({
       'tag': tag,
@@ -111,6 +122,50 @@ void main() {
       final latest = Updater.parseSemver(tag!);
       final current = Updater.parseSemver('0.1.4');
       expect(Updater.compareSemver(latest!, current!), greaterThan(0));
+    });
+
+    test('latest.json CDN is the primary source (tags API not hit)', () async {
+      var tagsCalls = 0;
+      final u = Updater(httpFetch: (url, headers) async {
+        if (url.contains('latest.json')) {
+          return (statusCode: 200, body: '{"tag":"v0.1.7"}');
+        }
+        if (url.contains('/tags')) {
+          tagsCalls++;
+          return (statusCode: 200, body: '[{"name":"v0.1.6"}]');
+        }
+        return (statusCode: 404, body: '');
+      });
+      final tag = await u.fetchLatestTag(forceRefresh: true);
+      expect(tag, equals('v0.1.7'));
+      expect(tagsCalls, equals(0));
+    });
+
+    test('latest.json accepts a "version" key (schema flexibility)', () async {
+      final u = Updater(httpFetch: stubCdn('{"version":"v0.1.8"}'));
+      final tag = await u.fetchLatestTag(forceRefresh: true);
+      expect(tag, equals('v0.1.8'));
+    });
+
+    test('latest.json ignores prerelease/irregular tags', () async {
+      final u = Updater(httpFetch: (url, headers) async {
+        if (url.contains('latest.json')) {
+          return (statusCode: 200, body: '{"tag":"v0.1.9-rc1"}');
+        }
+        if (url.contains('/tags')) {
+          return (statusCode: 200, body: '[{"name":"v0.1.9"},{"name":"v0.1.8"}]');
+        }
+        return (statusCode: 404, body: '');
+      });
+      final tag = await u.fetchLatestTag(forceRefresh: true);
+      expect(tag, equals('v0.1.9'));
+    });
+
+    test('CDN failure falls through to the Tags API', () async {
+      // All latest.json sources 404, so the Tags API must be consulted.
+      final u = Updater(httpFetch: stubFetch(tagsJson: '[{"name":"v0.1.4"}]'));
+      final tag = await u.fetchLatestTag(forceRefresh: true);
+      expect(tag, equals('v0.1.4'));
     });
   });
 }
