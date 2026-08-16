@@ -21,9 +21,15 @@ API key from the OpenAI-style billing endpoints
 (`/v1/dashboard/billing/subscription` and `/v1/dashboard/billing/usage`),
 so no session token is required to see quota or consumption.
 
+The pasted key is entered one of two ways (they store the same key):
+
+- CLI (`profile add <key-name> <api-key>`): paste the key directly, no
+  browser. Suits agents/scripts that run the bridge non-interactively.
+- Web (`login`): open the local sign-in page and paste the key there.
+
 ```
-agrout-bridge login             # headless: paste API key on the local page
-agrout-bridge profile add <name> [key]   # store a key directly
+agrout-bridge profile add <name> [key]   # CLI: store key directly
+agrout-bridge login                      # web: open local sign-in page to paste key
 agrout-bridge profile list
 agrout-bridge profile use <name>
 agrout-bridge profile remove <name>
@@ -116,12 +122,17 @@ agrout-bridge/
 ```bash
 agrout-bridge run                        # TUI mode (auto-starts proxy)
 agrout-bridge run --server               # Headless server mode
-agrout-bridge login                      # Headless login: paste an API key on the local page
-agrout-bridge profile add <name> [key]   # Add API key profile (prompt if key omitted)
+
+# Two ways to add your API key (same result, different entry point):
+#   CLI:  agrout-bridge profile add <key-name> <api-key>
+#   Web:  agrout-bridge login            (opens the local sign-in page)
+agrout-bridge profile add <name> [key]   # CLI: store key directly (prompt if key omitted)
+agrout-bridge login                      # Web: local sign-in page to paste key
+agrout-bridge profile login              # Alias of `login` (same flow)
 agrout-bridge profile list
 agrout-bridge profile use <name>
 agrout-bridge profile remove <name>
-agrout-bridge profile login              # Alias of `login` (same headless flow)
+
 agrout-bridge update                     # Download and install latest stable release
 agrout-bridge help
 agrout-bridge --version

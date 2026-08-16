@@ -52,6 +52,11 @@
 
 ### Improve
 
+- **Docs distinguish the two ways to add an API key.** `profile add
+  <key-name> <api-key>` is the CLI path (no browser, suited to agents and
+  scripts); `agrout-bridge login` is the web page path. README, INSTALL,
+  AGENTS and TUI docs present them as two separate options instead of one
+  combined quick-start line.
 - **Footer keymap labels are colored uniformly.** Previously the `[1-4]`,
   `[r]`, `[o]/[a]`, `[p]`, `[l]` keys were colored but their labels
   (page/refresh/copy endpoint/port/login) stayed grey. All key+label pairs

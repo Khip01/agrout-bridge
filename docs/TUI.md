@@ -107,9 +107,10 @@ manual API key paste is the only path. Credit and usage are available from
 the API key alone via the billing endpoints (see Profile page), no session
 needed.
 
-The same flow exists headless via `agrout-bridge login` (or
-`agrout-bridge profile login`): the CLI prints the URL, and after the key
-is saved the browser says "return to the bridge".
+The same flow can be started outside the TUI: `agrout-bridge login` (or
+its alias `agrout-bridge profile login`) prints the URL from the shell.
+If you prefer no browser at all, add the key directly over the CLI:
+`agrout-bridge profile add <key-name> <api-key>`.
 
 Keymap (active while the panel is open):
 
