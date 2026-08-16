@@ -1,0 +1,217 @@
+name: Bug report
+description: Report a bridge problem (content-blocked, sensitive_words, HTTP 504, quota, 401, garbled TUI, crash)
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a detailed report. Fill in every section. The wrong kind of
+        evidence is the main reason bridge issues are hard to triage, so the fields below
+        are shaped around what the bridge (and only the bridge) can observe.
+
+        Security: never paste an API key, session token, or the output of
+        `curl http://127.0.0.1:8318/v1/token`. `curl /info` and `curl /health` are safe to share.
+
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: Symptom
+      description: Which failure are you seeing?
+      multiple: false
+      options:
+        - content-blocked / sensitive_words (request rejected or stream cut mid-way)
+        - HTTP 504 (reachable error page after a long wait)
+        - Quota / budget error (402, Insufficient account balance)
+        - 401 unauthorized / invalid token
+        - Model list wrong or empty
+        - TUI glitch (garbled UI, crash, freeze)
+        - Login / sign-in problem
+        - Performance (very slow first response)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: symptoms
+    attributes:
+      label: What happened
+      description: Paste the exact upstream error text, red pixel lines, or describe the machine behavior. If you have the exact words from the error (e.g. `content_blocked`, `sensitive_words`, the HTML from a 504), copy them verbatim.
+      placeholder: |
+        "The request dies with content-blocked" is not enough. What exactly? Example:
+        [ts] PROXY 400 ... upstream body "content blocked ..." or an HTML 504 page snippet.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Whatever you can fill helps a lot.
+      value: |
+        - `agrout-bridge --version`:
+        - OS: (include distro / version)
+        - Installed via: (npm tarball, `./build`, other)
+        - Client: (OpenCode / Claude Desktop / Cursor / other)
+        - Client transport: (OpenAI-compatible or Anthropic-compatible provider block)
+        - Model id (exactly as in your client config, e.g. `claude-opus-5`):
+    validations:
+      required: true
+
+  - type: textarea
+    id: request-context
+    attributes:
+      label: Request context
+      description: What was in the failing request? This separates a bridge scrub bug from upstream policy.
+      value: |
+        - Approximate history size (number of turns / rough tokens):
+        - Attached images or reference images (yes/no):
+        - WebFetch / markdown results in the same request (yes/no):
+        - Discussion of Google Docs, large documents, or `kix.` element IDs (yes/no):
+        - System prompt: (default opencode, large AGENTS.md, custom?)
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Bridge diagnostics
+      description: |
+        The JSONL log (`~/.config/agrout-bridge/logs.jsonl`) is a rolling window of the
+        last 2000 entries, so a single `tail -n 10` can miss the failing request. Reproduce
+        the bug, then run the narrowed filters that target the relevant lines:
+
+        ```
+        # proxied requests that errored (4xx / 5xx) - paste the tail of this
+        rg 'PROXY (4|5)[0-9][0-9] ' ~/.config/agrout-bridge/logs.jsonl | tail -n 25
+
+        # lines mentioning the block / scrub keywords
+        rg -i 'content.blocked|sensitive_words|blocked|scrub|WAF' \
+          ~/.config/agrout-bridge/logs.jsonl | tail -n 25
+
+        # every line for one specific model (replace the id)
+        rg 'model=<PUT_MODEL_ID_HERE> ' ~/.config/agrout-bridge/logs.jsonl | tail -n 25
+        ```
+        Also paste (safe, no secrets):
+          ```
+          curl -s --max-time 10 http://127.0.0.1:8318/info
+          curl -s --max-time 10 http://127.0.0.1:8318/health
+          ```
+        Redact anything that looks like `sk-...`. If the failing request is no longer in
+        the log because it was evicted, say roughly how many requests happened since, and
+        grab the log (`cp ~/.config/agrout-bridge/logs.jsonl /tmp/`) right after the next
+        reproduction.
+      value: |
+        ```
+        /info output:
+
+        /health output:
+
+        filtered log output (PROXY errors / keywords / model):
+
+        ```
+      render: shell
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Agent session report (required)
+
+        We cannot read your client's conversation database, so the fastest way for us to
+        understand what was happening in the failing session is to let your own agent
+        summarize it. The failing session is usually abandoned after the error, so do this
+        from a NEW working session instead of trying to continue the broken one: open a
+        fresh message in your client (OpenCode / Claude Code / Cursor), then paste the
+        prompt below. It tells the agent which old session to investigate.
+        Replace `<YOUR SESSION NAME>` with the failing session's name, and
+        `<YOUR SESSION INFO>` with the session header (tokens used, percentage, cost) if
+        your client shows one.
+
+  - type: textarea
+    id: agent-report
+    attributes:
+      label: Agent session report
+      description: |
+        This is required. The bridge log only shows status / model / token counts; the
+        content that actually triggered the failure (tool-call, base64, kix., session size)
+        lives in the session, which only your agent can read. Open a NEW message in your
+        client, paste this prompt, then paste the agent's answer back here.
+
+        If you genuinely cannot run the agent (session deleted, client unavailable), write
+        "Not available" and one sentence saying why, so we know the gap instead of guessing.
+
+        ```text
+        Session name: <YOUR SESSION NAME>
+        Session info: <YOUR SESSION INFO>
+        Example: "Context, 400,146 tokens, 38% used, $33.95 spent"
+
+        A request in the session named above failed because of a bug in a local HTTP proxy
+        (agrout-bridge) that routes requests to an upstream gateway. That old session is
+        broken and cannot continue, so I am asking you in this new session to investigate
+        it. Read the history of "<YOUR SESSION NAME>" and produce a structured, factual
+        report about the failing request. Do not invent details. If you do not know a
+        value, write "unknown". Never output API keys, session tokens, or cookies.
+
+        Answer all of these:
+        1. What task was in progress when the failure happened? Quote the user prompt or
+           tool call that triggered it.
+        2. What error text did you observe? Include the exact wording: for example a
+           `content-blocked` or `sensitive_words` line, an HTTP status like 504/400/402,
+           "Insufficient account balance", or a stream that just cut off.
+        3. About how large was the conversation at that point? Approximate the token count
+           or number of messages (use the session info header if available).
+        4. What tool results were in the same request? List webfetch/markdown fetches,
+           file reads, attached images, or anything containing base64 data URIs or Google
+           Docs element IDs (strings like "kix.abc123").
+        5. What model id was configured and which provider block (OpenAI- or
+           Anthropic-compatible) was active?
+        6. What was in the system prompt: the default client instructions, a large
+           AGENTS.md, custom memory blocks, or anything unusual?
+        7. Could the failure be reproduced by a smaller request, or did it only happen on a
+           large / long session?
+        ```
+      value: |
+        Agent's answer:
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The more deterministic the better. If it only happens on large/long sessions, say so (that changes the diagnosis a lot).
+      placeholder: |
+        1. Start the bridge: `agrout-bridge run`
+        2. Point <client> at ...
+        3. Ask the model to ...
+        4. Observe ...
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect instead?
+      placeholder: "A normal 200 response / a streamed answer."
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Sanity check
+      description: Confirm the basics so we do not chase a fault outside the bridge.
+      options:
+        - label: "The bridge is running and reachable (curl `/info` works)"
+        - label: "I tried restarting the bridge before filing"
+        - label: "I confirmed the issue is not solved by toggling a different model"
+        - label: "I filled the agent session report, or wrote `Not available` with a reason"
+        - label: "I have not shared any API key or session token"
+    validations:
+      required: false

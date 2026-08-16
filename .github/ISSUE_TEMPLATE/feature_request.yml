@@ -1,0 +1,46 @@
+name: Feature request
+description: Suggest an improvement for agrout-bridge
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem you want solved and the shape of the solution.
+        Issues about a specific client (OpenCode, Claude Code, Cursor) should
+        say which one, because each behaves differently at the protocol layer.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do and why is the current bridge not good enough?
+      placeholder: "When I ... the bridge ... because ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: How will users interact with it? Which page / keymap / CLI command / endpoint?
+      placeholder: "In the TUI Profile page, ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternative
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you already tried.
+      placeholder: "I currently work around it by ..."
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Extra context
+      description: Screenshots, links, config sketches (nothing secret).
+    validations:
+      required: false

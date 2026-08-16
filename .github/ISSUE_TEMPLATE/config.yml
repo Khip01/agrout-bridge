@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/Khip01/agrout-bridge/blob/main/README.md
+    about: README and the docs/ folder (install, TUI, API reference, architecture).
+  - name: Measured content-filter research
+    url: https://github.com/Khip01/agrout-bridge/blob/main/docs/CONTENT-FILTER.md
+    about: Before filing a content-blocked / 504 report, read what the upstream gate actually measures (per-model ceilings and the scrub rules).
