@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:nocterm/nocterm.dart' hide LogEntry, Clipboard;
 
 import '../models/profile.dart';
+import '../models/version.dart';
 import '../services/api_client.dart';
 import '../services/login.dart';
 import '../services/log_store.dart';
@@ -27,6 +28,14 @@ class AgroutApp extends StatefulComponent {
 enum _Panel { main, help, quit, login, portConfig }
 
 enum _InfoPage { profile, usage, models, proxy }
+
+/// Login-screen lifecycle used to color-code the sign-in dialog.
+/// Mirrors a tiny state machine:
+///   idle   → waiting for the user to paste/confirm a key (URL is bright,
+///            Copy URL is the focused action)
+///   success → the API key validated and was stored (green, focus Esc)
+///   failed   → key rejected / error (red, show reason, focus Copy URL)
+enum _LoginState { idle, loading, success, failed }
 
 class AppState extends State<AgroutApp> {
   late final _profiles = component.profileStore;
@@ -53,8 +62,12 @@ class AppState extends State<AgroutApp> {
 
   String? _loginUrl;
   Timer? _loginExpiry;
-  bool _loginBusy = false;
   String? _loginMessage;
+
+  /// State machine for the sign-in dialog color coding.
+  _LoginState _loginState = _LoginState.idle;
+  /// Reason text shown in red when `_loginState == _LoginState.failed`.
+  String? _loginError;
 
   final _infoScrollCtrl = ScrollController();
   final _logScrollCtrl = ScrollController();
@@ -341,7 +354,7 @@ class AppState extends State<AgroutApp> {
       padding: const EdgeInsets.symmetric(horizontal: 1),
       child: Row(
         children: [
-          Text(' agrout-bridge', style: const TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold)),
+          Text(' agrout-bridge v. $bridgeVersion', style: const TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold)),
           const Spacer(),
           Text(_activeProfileLabel(), style: const TextStyle(color: Colors.grey)),
           Text('  [${_pageTab(_infoPage)}] ', style: const TextStyle(color: Colors.yellow, fontWeight: FontWeight.bold)),
@@ -808,9 +821,12 @@ class AppState extends State<AgroutApp> {
       _setStatus('Active profile not found.', duration: 4);
       return;
     }
+    // Reset dialog state into the idle state: URL will be highlighted,
+    // Copy URL is the focused action, no error text.
     _panel = _Panel.login;
     _pageRefreshTimer?.cancel();
-    _loginBusy = true;
+    _loginState = _LoginState.loading;
+    _loginError = null;
     _loginMessage = 'Starting local sign-in server...';
     _startLoginServer(p);
     setState(() {});
@@ -823,30 +839,37 @@ class AppState extends State<AgroutApp> {
       final url = await flow.start(onResult: (outcome) async {
         if (outcome.success) {
           applyLoginOutcome(profile, outcome, _profiles);
+          _loginState = _LoginState.success;
+          _loginError = null;
           _loginMessage = 'Login successful${outcome.username != null ? " as ${outcome.username}" : ""}';
-          _setStatus(_loginMessage!, duration: 4);
-          LogStore.success(_loginMessage!);
-          _loginBusy = false;
-          if (mounted) setState(() {});
+          setState(() {});
+          _setStatus('API key validated — login successful', duration: 4);
+          LogStore.success('Login successful${outcome.username != null ? " as ${outcome.username}" : ""}');
         } else {
-          _loginMessage = 'Login failed: ${outcome.message ?? 'unknown'}';
-          _setStatus(_loginMessage!, duration: 4);
-          LogStore.warning(_loginMessage!);
-          _loginBusy = false;
-          if (mounted) setState(() {});
+          _loginState = _LoginState.failed;
+          _loginError = outcome.message ?? 'token rejected by agentrouter.org';
+          _loginMessage = 'Login failed: ${_loginError}';
+          setState(() {});
+          _setStatus('Login failed — see dialog for reason', duration: 4);
+          LogStore.warning('Login failed: ${_loginError}');
         }
       });
       _loginUrl = url;
-      _loginMessage = 'Open the sign-in URL in your browser, authenticate, then paste your API key in the field below.';
-      _loginBusy = false;
+      // URL is ready → enter idle state: highlight the URL, enable copy.
+      _loginState = _LoginState.idle;
+      _loginError = null;
+      _loginMessage = 'Open the sign-in URL in a new browser tab, authenticate, then paste your API key in the form below.';
       _loginExpiry?.cancel();
       _loginExpiry = Timer(const Duration(minutes: 10), _closeLoginPanel);
       LogStore.info('Login flow ready: $url');
-      if (mounted) setState(() {});
+      setState(() {});
     } catch (e) {
-      _loginMessage = 'Failed to start login server: $e';
-      _loginBusy = false;
-      if (mounted) setState(() {});
+      _loginState = _LoginState.failed;
+      _loginError = 'Failed to start login server: $e';
+      _loginMessage = 'Login failed: ${_loginError}';
+      setState(() {});
+      _setStatus('Login server error — see dialog', duration: 4);
+      LogStore.error('Login server failed: $e');
     }
   }
 
@@ -859,22 +882,74 @@ class AppState extends State<AgroutApp> {
     setState(() {});
   }
 
-  Component _loginPanel() {
-    return Center(child: Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(border: BoxBorder.all(color: Colors.cyan)),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Text('Local sign-in link', style: TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 1),
-        Text(_loginBusy ? 'Starting...' : (_loginUrl ?? '(unavailable)'), style: const TextStyle(color: Colors.green)),
-        const SizedBox(height: 1),
-        Text(_loginMessage ?? '', style: const TextStyle(color: Colors.grey)),
-        const SizedBox(height: 1),
-        const Text('[c] copy URL   [Esc] close', style: TextStyle(color: Colors.grey)),
-      ]),
-    ));
+   Component _loginPanel() {
+     // Color palette driven by the sign-in state-machine:
+     //   idle    → URL/primary action is bright green (the URL is valid and
+     //            ready to copy), Copy URL key hint bright, Esc grey.
+     //   success → success message is bright green, focus Esc (user is done).
+     //   failed   → everything error-bright red, reason shown, Copy URL stays
+     //            bright so the user can retry/copy a different key.
+     //   loading  → "Starting..." in cyan, no key hints highlighted.
+     Color urlColor;
+     Color copyColor;   // color of [c] copy URL hint (primary action)
+     Color escColor;    // color of [Esc] hint (secondary / success-focused)
+     Color msgColor;
+     String urlText;
+     if (_loginState == _LoginState.success) {
+       urlColor = Colors.green;
+       copyColor = Colors.grey;
+       escColor = const Color(0xFF50FA7B); // bright green - focus Esc
+       msgColor = Colors.green;
+       urlText = 'done';
+     } else if (_loginState == _LoginState.failed) {
+       urlColor = Colors.red;
+       copyColor = const Color(0xFFFF5555);
+       escColor = Colors.grey;
+       msgColor = Colors.red;
+       urlText = _loginUrl ?? '(unavailable)';
+     } else if (_loginState == _LoginState.loading) {
+       urlColor = Colors.cyan;
+       copyColor = Colors.grey;
+       escColor = Colors.grey;
+       msgColor = Colors.cyan;
+       urlText = 'Starting server...';
+     } else {
+       // idle
+       urlColor = const Color(0xFF50FA7B); // bright green - URL is valid
+       copyColor = Colors.green;
+       escColor = Colors.grey;
+       msgColor = Colors.grey;
+       urlText = _loginUrl ?? '(unavailable)';
+     }
+     return Center(child: Container(
+       padding: const EdgeInsets.all(3),
+       decoration: BoxDecoration(border: BoxBorder.all(color: urlColor)),
+       child: Column(mainAxisSize: MainAxisSize.min, children: [
+         Text('Sign in to AgentRouter', style: TextStyle(color: urlColor, fontWeight: FontWeight.bold)),
+         const SizedBox(height: 1),
+         Text(' Local sign-in link ', style: TextStyle(color: urlColor)),
+         const SizedBox(height: 1),
+         if (_loginState == _LoginState.loading)
+           Text('Starting server...', style: TextStyle(color: Colors.cyan))
+         else
+           Text(urlText, style: TextStyle(color: urlColor)),
+         const SizedBox(height: 1),
+         Text(_loginMessage ?? '', style: TextStyle(color: msgColor)),
+         if (_loginState == _LoginState.failed && _loginError != null)
+           Padding(
+             padding: const EdgeInsets.only(top: 1),
+             child: Text('Reason: ${_loginError}', style: TextStyle(color: Colors.red, fontStyle: FontStyle.italic)),
+           ),
+          const SizedBox(height: 1),
+          Row(children: [
+            Text('[c] copy URL  ', style: TextStyle(color: copyColor)),
+            Text('[Esc] close', style: TextStyle(color: escColor)),
+          ]),
+        ]),
+      ));
+    }
   }
-}
+
 
 extension on ServerStatus {
   // no-op extension to keep imports tidy if the type ever needs helpers.

@@ -21,6 +21,9 @@ TUI for daemon / Docker usage.
 - Self-update via GitHub Release `.tgz`
 - Optional inbound `PROXY_AUTH_TOKEN` for remote bind
 - 429/QPS-aware retry with exponential backoff
+- Content-blocked mitigation: strips base64 data URIs / `kix.` element IDs
+  from text before forwarding so large OpenCode/Claude Code sessions pass the
+  upstream filter (preserves real uploaded images)
 
 ## Install
 

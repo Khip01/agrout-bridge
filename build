@@ -2,8 +2,13 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
+
+# Resolve package.json version so the compiled binary reports the right
+# --version string via String.fromEnvironment('PACKAGE_VERSION').
+VERSION="$(node -p "require('./package.json').version")"
+
 echo "Getting dependencies..."
 dart pub get
-echo "Compiling..."
-dart compile exe bin/agrout_bridge.dart -o bin-executables/app-linux
-echo "Done! Binary at bin-executables/app-linux"
+echo "Compiling (PACKAGE_VERSION=${VERSION})..."
+dart compile exe bin/agrout_bridge.dart -o bin-executables/app-linux --dart-define=PACKAGE_VERSION="${VERSION}"
+echo "Done! Binary at bin-executables/app-linux (v${VERSION})"
