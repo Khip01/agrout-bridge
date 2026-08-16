@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.19 (2026-08-16)
+
+### Improve
+
+- **Footer highlights page-scoped keys.** When a page has extra keymap
+  beyond the global keys (Profile: up/down / Enter / Shift+D; Models:
+  up/down / Enter), those keys appear in the footer in a distinct bright
+  color, so switching pages shows which keys are available there.
+- **Refresh after login/add.** Once an API key is validated and stored, the
+  TUI refreshes models, WAF, billing and the profile summary immediately,
+  so a newly added profile is loaded everywhere without a restart.
+
 ## v0.1.18 (2026-08-16)
 
 ### Improve

@@ -966,8 +966,41 @@ class AppState extends State<AgroutApp> {
         Text('quit  ', style: base),
         Text('[Ctrl+L] ', style: base),
         Text('log', style: base),
+        ..._pageScopedFooter(base),
       ]),
     );
+  }
+
+  /// Keys that only work on the current page, highlighted so the user sees
+  /// there is extra keymap available beyond the global footer keys.
+  List<Component> _pageScopedFooter(TextStyle base) {
+    final pageStyle = TextStyle(
+      color: const Color(0xFFE08BFF), // bright violet, distinct from nav/action/config
+      fontWeight: FontWeight.bold,
+    );
+    switch (_infoPage) {
+      case _InfoPage.profile:
+        return [
+          Text('  |  ', style: base),
+          Text('[up/down] ', style: pageStyle),
+          Text('pick  ', style: pageStyle),
+          Text('[Enter] ', style: pageStyle),
+          Text('switch  ', style: pageStyle),
+          Text('[Shift+D] ', style: pageStyle),
+          Text('delete', style: pageStyle),
+        ];
+      case _InfoPage.models:
+        return [
+          Text('  |  ', style: base),
+          Text('[up/down] ', style: pageStyle),
+          Text('pick  ', style: pageStyle),
+          Text('[Enter] ', style: pageStyle),
+          Text('copy id', style: pageStyle),
+        ];
+      case _InfoPage.usage:
+      case _InfoPage.proxy:
+        return const [];
+    }
   }
 
   // ── Log side panel ────────────────────────────────────────────────
@@ -1292,7 +1325,15 @@ class AppState extends State<AgroutApp> {
           _loginState = _LoginState.success;
           _loginError = null;
           _loginMessage = 'Login successful';
+          // Refresh every page so the new/updated key is loaded everywhere:
+          // models, WAF, billing, and the profile summary.
+          _lastModelVersion = -1;
+          _lastLogVersion = LogStore.version;
+          _billing = null;
+          _syncProfileSelectionToActive();
           setState(() {});
+          _doRefresh();
+          unawaited(_refreshBilling());
           _setStatus('API key validated, login successful', duration: 4);
           LogStore.success('Login successful');
         } else {
