@@ -368,6 +368,10 @@ with `package.json` when bumping a release.
 | `q` | Main | Quit confirmation |
 | `up/down` | Main | Scroll / navigate |
 | `PgUp/PgDn` | Main | Scroll 10 lines |
+| `up/down` | Profile page | Move the profile highlight |
+| `Enter` | Profile page | Switch the active profile |
+| `Shift+D` | Profile page | Delete the highlighted profile (Y/N confirmation dialog) |
+| `PgUp/PgDn` | Profile page | Scroll the profile list by 10 lines |
 | `up/down` | Models page | Move the model highlight |
 | `Enter` | Models page | Copy selected model id |
 | `PgUp/PgDn` | Models page | Scroll the model list by 10 lines |

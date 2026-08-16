@@ -2,6 +2,20 @@
 
 ## v0.1.17 (2026-08-16)
 
+### Improve
+
+- **TUI first-run UX points to login.** When no API key is configured the
+  Profile page says "No API key yet. Press [l] login" (with `[l]`
+  highlighted) instead of suggesting a CLI command, and the footer's
+  `[l] login` keymap is highlighted until a key exists.
+- **Profile page is a picker.** `up`/`down` move the profile highlight,
+  `Enter` switches the active profile (config persisted, models + billing
+  refreshed), and the current profile is flagged with a bright `(current)`
+  label. Selection starts on the active profile when the page is shown.
+- **Delete profile from the TUI.** `Shift+D` (Profile page only) opens a
+  Y/N confirmation dialog; confirming removes the profile, fixes the active
+  id if it pointed at the deleted key, and refreshes.
+
 ### Changed
 
 - **Profiles are API-key only. Session tokens removed.** `Profile` no longer

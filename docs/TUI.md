@@ -27,7 +27,7 @@ log is a sidebar, fullscreen log when toggled.
 
 | Key | Page | Data |
 |-----|------|------|
-| `1` | Profile | Active profile, key (masked), key-added date, billing quota/usage (via API key), list of all profiles |
+| `1` | Profile | Active profile, key (masked), key-added date, billing quota/usage (via API key), selectable profile list |
 | `2` | Usage & Cost | Total / success / streamed request counts, success rate, tokens (in/out/cache), cumulative cost, per-model breakdown |
 | `3` | Models | Live model list. Press `Enter` on a model to copy its id. |
 | `4` | Proxy Config | Port, listen address, uptime, active streams, circuit state, WAF cookie entries, model health failures |
@@ -54,6 +54,18 @@ log is a sidebar, fullscreen log when toggled.
 | `f` | Toggle log fullscreen / sidebar |
 | `Shift+C` | Clear all log entries (Y/N confirm via status bar) |
 | `Shift+O` | Clear entries before today |
+
+## Profile page
+
+The profile list is interactive: `up`/`down` moves the highlight, `Enter`
+switches the highlighted profile to active, and `Shift+D` opens a Y/N
+confirm dialog to delete it (the active id is corrected if needed).
+
+| Key | Action |
+|-----|--------|
+| `up/down` | Move the profile highlight |
+| `Enter` | Switch the active profile |
+| `Shift+D` | Delete the highlighted profile (asks Y/N) |
 
 ## Models page
 

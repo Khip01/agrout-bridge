@@ -54,6 +54,8 @@ agrout-bridge run --server                 # headless
 In the TUI:
 
 - Press `[l]` to open the login URL (paste an API key)
+- On the Profile page, `up`/`down` select a profile, `Enter` switches it,
+  `Shift+D` deletes it
 - Press `[p]` to configure the proxy port
 - Press `[1] [2] [3] [4]` to switch pages
 - Press `[Ctrl+L]` to toggle the log side panel

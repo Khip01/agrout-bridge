@@ -25,7 +25,7 @@ class AgroutApp extends StatefulComponent {
   State<AgroutApp> createState() => AppState();
 }
 
-enum _Panel { main, help, quit, login, portConfig }
+enum _Panel { main, help, quit, login, portConfig, deleteConfirm }
 
 enum _InfoPage { profile, usage, models, proxy }
 
@@ -55,6 +55,9 @@ class AppState extends State<AgroutApp> {
   Timer? _pageRefreshTimer;
 
   int _selectedModelIndex = 0;
+  int _selectedProfileIndex = 0;
+
+  Profile? _pendingDeleteProfile;
   bool _loadingModels = false;
 
   Map<String, dynamic>? _billing;
@@ -204,6 +207,17 @@ class AppState extends State<AgroutApp> {
       }
       return false;
     }
+    if (_panel == _Panel.deleteConfirm) {
+      if (e.logicalKey == LogicalKey.keyY || e.logicalKey == LogicalKey.enter) {
+        _confirmDeleteProfile();
+        return true;
+      }
+      if (e.logicalKey == LogicalKey.keyN || e.logicalKey == LogicalKey.escape) {
+        _cancelDeleteProfile();
+        return true;
+      }
+      return false;
+    }
     if (_panel == _Panel.login) {
       // Login panel: [c] copy URL, [Esc] close (and stop server).
       if (e.logicalKey == LogicalKey.keyC && !e.isControlPressed) {
@@ -325,6 +339,44 @@ class AppState extends State<AgroutApp> {
         }
       }
     }
+
+    // Profile list navigation, only on the Profile page: up/down moves the
+    // highlight, Enter switches the active profile. Mirrors the Models page
+    // picker so users can pick which API key the proxy uses.
+    if (_infoPage == _InfoPage.profile) {
+      final profiles = _profiles.all;
+      if (profiles.isNotEmpty) {
+        if (e.logicalKey == LogicalKey.arrowUp && _selectedProfileIndex > 0) {
+          _selectedProfileIndex--;
+          _scrollToProfile();
+          setState(() {});
+          return true;
+        }
+        if (e.logicalKey == LogicalKey.arrowDown &&
+            _selectedProfileIndex < profiles.length - 1) {
+          _selectedProfileIndex++;
+          _scrollToProfile();
+          setState(() {});
+          return true;
+        }
+        if (e.logicalKey == LogicalKey.enter) {
+          _switchActiveProfile();
+          return true;
+        }
+        if (e.logicalKey == LogicalKey.keyD && e.isShiftPressed && !e.isControlPressed) {
+          _askDeleteProfile();
+          return true;
+        }
+        if (e.logicalKey == LogicalKey.pageUp) {
+          _scrollUp(10);
+          return true;
+        }
+        if (e.logicalKey == LogicalKey.pageDown) {
+          _scrollDown(10);
+          return true;
+        }
+      }
+    }
     return false;
   }
 
@@ -343,8 +395,19 @@ class AppState extends State<AgroutApp> {
   void _setPage(_InfoPage p) {
     _infoPage = p;
     _selectedModelIndex = 0;
+    if (p == _InfoPage.profile) {
+      _syncProfileSelectionToActive();
+    }
     _infoScrollCtrl.jumpTo(0);
     setState(() {});
+  }
+
+  /// Move the profile highlight to the currently active profile when the
+  /// Profile page is shown, so Enter/up/down start from the key in use.
+  void _syncProfileSelectionToActive() {
+    final id = _config.config.activeProfileId;
+    final idx = _profiles.all.indexWhere((pr) => pr.id == id);
+    _selectedProfileIndex = idx < 0 ? 0 : idx;
   }
 
   void _scrollUp(int lines) {
@@ -360,6 +423,79 @@ class AppState extends State<AgroutApp> {
     // Approximate: each model row renders on one line; offset by the header.
     final offset = (_selectedModelIndex * 1.0).clamp(0.0, double.infinity);
     _infoScrollCtrl.jumpTo(offset);
+  }
+
+  void _scrollToProfile() {
+    // Approximate: each profile row renders on one line; offset by the
+    // active-profile summary block above the list.
+    final offset = (7.0 + _selectedProfileIndex)
+        .clamp(0.0, double.infinity);
+    _infoScrollCtrl.jumpTo(offset);
+  }
+
+  void _switchActiveProfile() {
+    final profiles = _profiles.all;
+    if (_selectedProfileIndex < 0 || _selectedProfileIndex >= profiles.length) {
+      return;
+    }
+    final target = profiles[_selectedProfileIndex];
+    if (target.id == _config.config.activeProfileId) {
+      _setStatus('"${target.name}" is already the active profile', duration: 3);
+      return;
+    }
+    _config.config.activeProfileId = target.id;
+    _config.save();
+    _billing = null;
+    _setStatus('Active profile: ${target.name}', duration: 3);
+    LogStore.info('Switched active profile to ${target.name}');
+    setState(() {});
+    // _doRefresh is async void; it guards itself with _loadingModels.
+    _doRefresh();
+  }
+
+  /// Open the delete-confirmation dialog for the highlighted profile.
+  void _askDeleteProfile() {
+    final profiles = _profiles.all;
+    if (_selectedProfileIndex < 0 || _selectedProfileIndex >= profiles.length) {
+      return;
+    }
+    _pendingDeleteProfile = profiles[_selectedProfileIndex];
+    _pageRefreshTimer?.cancel();
+    _panel = _Panel.deleteConfirm;
+    setState(() {});
+  }
+
+  /// User confirmed the delete: remove the profile, fix the active id, reset
+  /// the selection, and return to the main panel.
+  void _confirmDeleteProfile() {
+    final target = _pendingDeleteProfile;
+    _pendingDeleteProfile = null;
+    _panel = _Panel.main;
+    if (target == null) {
+      _startPageRefresh();
+      setState(() {});
+      return;
+    }
+    final wasActive = target.id == _config.config.activeProfileId;
+    _profiles.remove(target.id);
+    if (wasActive) {
+      _config.config.activeProfileId = _profiles.all.isNotEmpty ? _profiles.all.first.id : null;
+      _config.save();
+      _billing = null;
+    }
+    _selectedProfileIndex = 0;
+    _setStatus('Deleted profile "${target.name}"', duration: 3);
+    LogStore.info('Deleted profile ${target.name}');
+    _startPageRefresh();
+    setState(() {});
+    _doRefresh();
+  }
+
+  void _cancelDeleteProfile() {
+    _pendingDeleteProfile = null;
+    _panel = _Panel.main;
+    _startPageRefresh();
+    setState(() {});
   }
 
   void _doRefresh() async {
@@ -457,6 +593,7 @@ class AppState extends State<AgroutApp> {
   Component _buildBody() {
     if (_panel == _Panel.help) return _helpPanel();
     if (_panel == _Panel.quit) return _quitPanel();
+    if (_panel == _Panel.deleteConfirm) return _deleteConfirmPanel();
     if (_panel == _Panel.login) return _loginPanel();
     if (_panel == _Panel.portConfig) return _portConfigPanel();
 
@@ -523,15 +660,43 @@ class AppState extends State<AgroutApp> {
         _kv('Used (last 30d)', _fmtUsed(_billing!['usage']?['total_usage'])),
       ] else if (_loadingBilling)
         Text('Fetching billing...', style: TextStyle(color: Colors.grey)),
-      _section('Available profiles'),
-      ..._profiles.all.map((pr) => Padding(
-            padding: const EdgeInsets.symmetric(vertical: 0),
-            child: Text('${pr.id == id ? "*" : " "} ${pr.name}', style: const TextStyle(color: Colors.grey)),
-          )),
+      _section('Profiles (up/down select, Enter switch)'),
+      ..._profiles.all.asMap().entries.map((entry) {
+        final i = entry.key;
+        final pr = entry.value;
+        final isCurrent = pr.id == id;
+        final isSelected = i == _selectedProfileIndex;
+        final prefix = isSelected ? '▸ ' : '  ';
+        final style = isSelected
+            ? const TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold)
+            : const TextStyle(color: Colors.grey);
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 0),
+          child: Row(children: [
+            Text(prefix, style: style),
+            Text(pr.name, style: style),
+            if (isCurrent)
+              Text(' (current)',
+                  style: const TextStyle(
+                    color: Color(0xFF7FFF00),
+                    fontWeight: FontWeight.bold,
+                  )),
+          ]),
+        );
+      }),
       if (_profiles.all.isEmpty)
-        Text('No profiles. Run `agrout-bridge profile add <name> <key>` then restart.', style: TextStyle(color: Colors.grey)),
+        Padding(
+          padding: const EdgeInsets.only(left: 1),
+          child: Row(children: [
+            const Text('No API key yet. Press ', style: TextStyle(color: Colors.grey)),
+            Text('[l]', style: const TextStyle(color: Color(0xFF8BD4BA), fontWeight: FontWeight.bold)),
+            const Text(' login to paste your AgentRouter API key.', style: TextStyle(color: Colors.grey)),
+          ]),
+        ),
     ];
   }
+
+  bool get _hasNoKey => _profiles.all.isEmpty || _profiles.all.every((p) => p.apiKey.isEmpty);
 
   String _fmtLimit(dynamic v) {
     if (v is! num) return '-';
@@ -771,7 +936,9 @@ class AppState extends State<AgroutApp> {
     if (_panel != _Panel.main) {
       final hint = _panel == _Panel.login
           ? '[c] copy URL | [Esc] close'
-          : '[Esc] back';
+          : _panel == _Panel.deleteConfirm
+              ? '[y] confirm  [n] cancel'
+              : '[Esc] back';
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 1),
         child: Text(' $hint', style: base),
@@ -788,8 +955,11 @@ class AppState extends State<AgroutApp> {
         Text('copy endpoint  ', style: base),
         Text('[p] ', style: cfgStyle),
         Text('port  ', style: base),
-        Text('[l] ', style: cfgStyle),
-        Text('login  ', style: base),
+        if (_hasNoKey)
+          Text('[l] ', style: actionStyle)
+        else
+          Text('[l] ', style: cfgStyle),
+        Text('login  ', style: _hasNoKey ? actionStyle : base),
         Text('[h] ', style: base),
         Text('help  ', style: base),
         Text('[q] ', style: base),
@@ -936,7 +1106,7 @@ class AppState extends State<AgroutApp> {
     add('Help', Colors.cyan);
     add('');
     add('Pages:', Colors.cyan);
-    add('  [1] Profile       - active profile, key, billing');
+    add('  [1] Profile       - active profile, key, billing, switch profile');
     add('  [2] Usage & Cost  - request counts, success rate, tokens, cost, per-model');
     add('  [3] Models        - live model list (press Enter to copy id)');
     add('  [4] Proxy Config  - port, endpoints, circuit, WAF cookies');
@@ -945,6 +1115,12 @@ class AppState extends State<AgroutApp> {
     add('  [r]       Refresh models + WAF');
     add('  [o]       Copy OpenAI endpoint URL');
     add('  [a]       Copy Anthropic endpoint URL');
+    add('');
+    add('Profile page ([1]) only:', Colors.cyan);
+    add('  [up/down] Move the profile highlight');
+    add('  [Enter]   Switch the active profile');
+    add('  [Shift+D] Delete the highlighted profile (asks Y/N)');
+    add('  [PgUp/PgDn] Scroll the list by 10 lines');
     add('');
     add('Models page ([3]) only:', Colors.cyan);
     add('  [up/down] Move the model highlight');
@@ -964,6 +1140,22 @@ class AppState extends State<AgroutApp> {
     add('  [q]  Quit');
 
     return Padding(padding: const EdgeInsets.all(2), child: ListView(controller: _infoScrollCtrl, children: lines));
+  }
+
+  // ── Delete-profile confirmation ────────────────────────────────────
+  Component _deleteConfirmPanel() {
+    final target = _pendingDeleteProfile;
+    return Center(child: Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(border: BoxBorder.all(color: Color(0xFFFF8A8A))),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text('Delete profile?', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF8A8A))),
+        const SizedBox(height: 1),
+        Text('Remove "${target?.name ?? ''}" and its API key?'),
+        const SizedBox(height: 1),
+        const Text('[y] Yes  [n] No'),
+      ]),
+    ));
   }
 
   // ── Quit panel ────────────────────────────────────────────────────
