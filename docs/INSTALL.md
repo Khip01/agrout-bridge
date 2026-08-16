@@ -29,8 +29,10 @@ install, and runs `npm install -g`. A restart is required after updating.
 ## Quick start
 
 ```bash
-# 1. Add a profile (the API key is prompted; the form masks input).
-agrout-bridge profile add my-key
+# 1. Add a profile. Paste an API key from the agentrouter.org dashboard:
+agrout-bridge login                 # opens a local URL; paste the key + an optional name
+# or, without the browser flow:
+agrout-bridge profile add my-key    # prompts for the API key
 
 # 2. Run the bridge.
 agrout-bridge run            # TUI mode

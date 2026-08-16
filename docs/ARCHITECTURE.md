@@ -26,7 +26,7 @@ agrout-bridge/
 │       ├── services/
 │       │   ├── spoof.dart          # Claude Code spoof header constants
 │       │   ├── waf.dart            # WAF cookie jar (parse, merge, serialize, classify)
-│       │   ├── api_client.dart     # AgentRouter HTTP client (login, self, models, chat, messages)
+│       │   ├── api_client.dart     # AgentRouter HTTP client (models, chat, messages, billing)
 │       │   ├── login.dart          # Local sign-in server (paste API key, validate /v1/models)
 │       │   ├── usage_store.dart    # Aggregated usage + cost from response billing
 │       │   ├── log_store.dart      # JSONL activity log (2000 entries)
