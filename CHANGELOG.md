@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.15 (2026-08-16)
+## v0.1.16 (2026-08-16)
 
 ### Docs
 
@@ -12,7 +12,12 @@
   Bedrock-backed model with HTTP 400 "Operation not allowed" (model
   context window). The recommended declared limit for the Claude family is
   updated from a placeholder `480000` to `900000` (context/input) in
-  `docs/CONTENT-FILTER.md`.
+  `docs/CONTENT-FILTER.md`, `docs/INSTALL.md` and the README.
+- **Per-client configuration docs.** `docs/INSTALL.md` now carries a
+  recommended-limits table and concrete configs for OpenCode (Anthropic +
+  OpenAI paths), Claude Code, Cursor, Continue, and generic
+  OpenAI-compatible clients. The README gained an OpenCode
+  configuration section.
 
 ### Fix
 
@@ -52,20 +57,29 @@
 - **Footer keymap is colour-coded by category.** Navigation keys are cyan,
   actions (`[r]`, `[o]`/`[a]`) soft green, configuration (`[p]`, `[l]`) amber,
   and meta keys grey.
-- **Header shows the version** as `agrout-bridge vX.Y.Z` (no stray spacing).
-- **Login dialog is a width-bounded state machine with calm colour coding.**
-  The panel no longer stretches across the full terminal width, and it tracks
-  an explicit state instead of a single boolean:
-  - Idle: amber URL, `[c] copy URL` is the focused action.
+- **Login dialog is width-bounded and uses a calmer palette.** Extends the
+  v0.1.15 state machine: the panel no longer stretches across the full
+  terminal width, and the colours are muted pastels (amber idle, soft green
+  success, warm red failure) instead of saturated neon.
+- **Removed every em dash (U+2014)** from docs and code comments / UI strings,
+  per the global project writing rule.
+
+## v0.1.15 (2026-08-16)
+
+### Improve
+
+- **Login dialog is a state-machine with color-coded feedback.** The sign-in
+  dialog now tracks an explicit state: idle / loading / success / failed.
+  - Idle: URL is bright green and `[c] copy URL` is the focused primary action.
   - Loading: cyan "Starting server..." while the local server boots.
-  - Success: soft-green confirmation, `[Esc]` becomes the focused action.
-  - Failed: warm-red message with the reason inline, `[c] copy URL` stays lit
-    so the user can retry.
-  Colours are muted pastels rather than saturated neon.
-- **Version is resolved dynamically.** `bridgeVersion` now reads the
-  `PACKAGE_VERSION` dart-define (with a hard-coded fallback in `version.dart`),
-  and `build` / `build.bat` pass `package.json`'s version through, so the
-  binary's `--version` and the TUI header always match the released tarball.
+  - Success: bright-green confirmation message, Escape is the focused action.
+  - Failed: red message + reason shown inline, `[c] copy URL` stays bright so
+    the user can retry.
+- **Version badge in TUI header.** The header now reads
+  `agrout-bridge v. X.Y.Z`. The version is resolved at compile time from the
+  `PACKAGE_VERSION` dart-define (fallback hard-coded in `version.dart`); the
+  `build` / `build.bat` scripts read `package.json` version and pass it in, so
+  binary `--version` always matches the npm tarball release.
 - **OAuth buttons open in a new browser tab.** `<a ... target="_blank">` so the
   user stays on the `http://127.0.0.1/.../login` page to paste their API key in
   the form below.
