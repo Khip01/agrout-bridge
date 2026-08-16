@@ -391,7 +391,7 @@ with `package.json` when bumping a release.
 | `p` | Main | Port configuration panel |
 | `t` | Port config | Test the new port before saving (`[Enter]` save disabled until it succeeds) |
 | `l` | Main | Login panel (paste API key) |
-| `Shift+U` | Main | Close the TUI and print the update instruction (shown when a newer stable exists) |
+| `Shift+U` | Main | Open update dialog: `[c]` copy command, `[y]` exit like quit (shown when a newer stable exists) |
 | `h` | Main | Help panel |
 | `q` | Main | Quit confirmation |
 | `up/down` | Main | Scroll / navigate |

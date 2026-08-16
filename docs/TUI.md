@@ -43,7 +43,7 @@ log is a sidebar, fullscreen log when toggled.
 | `p` | Port configuration panel |
 | `t` | Port config | Test the new port (enables `[Enter]` save) |
 | `l` | Local sign-in link panel (paste API key) |
-| `Shift+U` | Close the TUI and print the update instruction (shown when a newer stable exists) |
+| `Shift+U` | Open update dialog: `[c]` copy command, `[y]` exit like quit (shown when a newer stable exists) |
 | `h` | Help panel |
 | `q` | Quit confirmation |
 | `Ctrl+L` | Toggle log side panel |

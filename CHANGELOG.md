@@ -102,12 +102,9 @@
   GitHub tag against `bridgeVersion` on startup (and when version state
   changes): when a newer stable exists, the header shows a bright amber
   `Update Available! vX.Y.Z` badge and the footer adds a `[Shift+U] update`
-  keymap in the same color. `[Shift+U]` opens a confirm dialog (same
-  palette); confirming stops the proxy, spawns a detached
-  `agrout-bridge update` inheriting stdout, and shuts the TUI down cleanly
-  (nocterm restores the terminal before exit, so the child's progress
-  prints on a healthy screen). Headless and TUI modes also print the update
-  notice before the proxy starts.
+  keymap in the same color. Note: the in-TUI auto-update described below
+  proved unreliable and was replaced in v0.1.21 with the copy-command flow
+  (see the v0.1.21 entry).
 
 ### Polish
 
