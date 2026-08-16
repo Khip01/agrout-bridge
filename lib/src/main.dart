@@ -143,18 +143,31 @@ Future<void> _runCommand(List<String> args) async {
   }
 
   // TUI mode.
+  String? requestedUpdateTag;
   final app = AgroutApp(
     profileStore: profiles,
     configStore: config,
     proxyServer: controller,
+    onUpdateRequested: (tag) {
+      requestedUpdateTag = tag;
+    },
   );
   await runApp(app);
-  // Mirrors commandcode-bridge: do not `exit(0)` here. The TUI calls
-  // `shutdownApp(0)` which asks nocterm to restore the terminal and end
-  // the process naturally. Calling `exit()` from outside the TUI would
-  // race with the alternate-screen restore and re-introduce the
-  // mouse-tracking leak.
-  await controller.stop();
+  // Normal quit path: the TUI calls `shutdownApp(0)` which asks nocterm to
+  // restore the terminal and exit the process; `runApp` does not return.
+  //
+  // Update path: the TUI uses `TerminalBinding.shutdown()` (no `exit()`), so
+  // `runApp` returns here with the process still alive and the terminal
+  // restored. Print the update instruction, then exit normally.
+  if (requestedUpdateTag != null) {
+    stdout.writeln();
+    stdout.writeln('agrout-bridge v$bridgeVersion -> $requestedUpdateTag');
+    stdout.writeln('Update the bridge with:');
+    stdout.writeln('  agrout-bridge update');
+    stdout.writeln();
+    stdout.flush();
+  }
+  exit(0);
 }
 
 Future<void> _profileCommand(List<String> args) async {

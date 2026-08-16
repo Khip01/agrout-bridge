@@ -99,6 +99,12 @@ agrout-bridge/
 
 ## CLI contract
 
+> TUI update flow: `[Shift+U]` closes the TUI (via
+> `TerminalBinding.instance.shutdown()`, which restores the terminal without
+> exiting the process), then `main.dart` prints
+> `agrout-bridge update` and exits. The TUI never runs the update in-process;
+> the standalone command replaces the binary from a stable process.
+
 ```bash
 agrout-bridge run                        # TUI mode (auto-starts proxy)
 agrout-bridge run --server               # Headless server mode
@@ -367,7 +373,7 @@ with `package.json` when bumping a release.
 | `p` | Main | Port configuration panel |
 | `t` | Port config | Test the new port before saving (`[Enter]` save disabled until it succeeds) |
 | `l` | Main | Login panel (paste API key) |
-| `Shift+U` | Main | Update the bridge (shown only when a newer stable exists) |
+| `Shift+U` | Main | Close the TUI and print the update instruction (shown when a newer stable exists) |
 | `h` | Main | Help panel |
 | `q` | Main | Quit confirmation |
 | `up/down` | Main | Scroll / navigate |

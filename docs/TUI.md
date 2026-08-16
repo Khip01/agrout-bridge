@@ -43,7 +43,7 @@ log is a sidebar, fullscreen log when toggled.
 | `p` | Port configuration panel |
 | `t` | Port config | Test the new port (enables `[Enter]` save) |
 | `l` | Local sign-in link panel (paste API key) |
-| `Shift+U` | Update the bridge (shown when a newer stable exists) |
+| `Shift+U` | Close the TUI and print the update instruction (shown when a newer stable exists) |
 | `h` | Help panel |
 | `q` | Quit confirmation |
 | `Ctrl+L` | Toggle log side panel |
@@ -122,3 +122,23 @@ Keymap (active while the panel is open):
 
 `[q]` opens a Y/N confirmation. `[y]` / `Enter` stops the proxy and
 exits. `[n]` / `Esc` returns to the main panel.
+
+## Update flow
+
+When a newer stable version exists, the header shows an
+`Update Available!` badge and the footer adds a `[Shift+U]` key.
+Pressing it opens a confirm dialog:
+
+- `[y]` closes the TUI (via nocterm's `TerminalBinding.shutdown()`, which
+  restores the terminal without exiting the process) and prints the update
+  instruction:
+  ```
+  agrout-bridge vX.Y.Z -> vX.Y.Z+1
+  Update the bridge with:
+    agrout-bridge update
+  ```
+- `[n]` / `Esc` returns to the main panel.
+
+The bridge does not run the update itself: `agrout-bridge update` is a
+standalone command that survives the TUI's exit, so the binary is replaced
+from a stable process. The TUI never attempts an in-process update.

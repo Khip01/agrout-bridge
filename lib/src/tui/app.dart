@@ -28,7 +28,18 @@ class AgroutApp extends StatefulComponent {
   final ProfileStore profileStore;
   final ConfigStore configStore;
   final ServerController proxyServer;
-  AgroutApp({required this.profileStore, required this.configStore, required this.proxyServer});
+
+  /// Called by the TUI when the user confirms an update. Invoked from the
+  /// same call that then closes the TUI via [TerminalBinding.shutdown], so
+  /// the host (main) can print update instructions after `runApp` returns.
+  final void Function(String tag)? onUpdateRequested;
+
+  AgroutApp({
+    required this.profileStore,
+    required this.configStore,
+    required this.proxyServer,
+    this.onUpdateRequested,
+  });
 
   @override
   State<AgroutApp> createState() => AppState();
@@ -1271,7 +1282,7 @@ class AppState extends State<AgroutApp> {
     add('Other:', Colors.cyan);
     add('  [p]  Port configuration panel');
     add('  [l]  Open login URL (paste API key)');
-    if (_updateTag != null) add('  [Shift+U]  Update to $_updateTag (stops the bridge)');
+    if (_updateTag != null) add('  [Shift+U]  Close bridge and suggest update to $_updateTag');
     add('  [h]  Help');
     add('  [q]  Quit');
 
@@ -1311,19 +1322,24 @@ class AppState extends State<AgroutApp> {
   /// shut the TUI down cleanly. `stop()` is deliberately NOT awaited: with an
   /// active SSE stream it can hang, which freezes the TUI before shutdown.
   /// The process exit lets the OS reap the listener anyway.
+  /// Confirm the update: notify the host via [AgroutApp.onUpdateRequested] and
+  /// close only the TUI (not the process) using [TerminalBinding.shutdown],
+  /// which restores the terminal without calling `exit()`. `runApp()` then
+  /// returns in `main.dart`, where the update instructions are printed and
+  /// the process exits normally. `_proxy.stop()` is bounded by a timeout so
+  /// an active SSE stream can never freeze the shutdown.
   Future<void> _doUpdate() async {
+    final tag = _updateTag;
     try {
-      Process.start(
-        Platform.resolvedExecutable,
-        ['update'],
-        mode: ProcessStartMode.detachedWithStdio,
-      );
-    } catch (e) {
-      // Rare (e.g. executable not spawnable). Still exit, the user can run
-      // `agrout-bridge update` manually; log it so it shows in the next run.
-      LogStore.error('Update spawn failed: $e');
+      await _proxy.stop().timeout(const Duration(seconds: 2));
+    } catch (_) {
+      // Port release is best-effort; the process exits right after, and the
+      // OS reaps the listener.
     }
-    shutdownApp(0);
+    if (tag != null) {
+      component.onUpdateRequested?.call(tag);
+    }
+    TerminalBinding.instance.shutdown();
   }
 
   Component _updateConfirmPanel() {
@@ -1336,7 +1352,9 @@ class AppState extends State<AgroutApp> {
         const SizedBox(height: 1),
         Text('agrout-bridge v$bridgeVersion -> $_updateTag'),
         const SizedBox(height: 1),
-        const Text('The bridge will be closed and updated.'),
+        const Text('The TUI will be closed.'),
+        const SizedBox(height: 1),
+        const Text('After exiting, run:  agrout-bridge update'),
         const SizedBox(height: 1),
         const Text('[y] Yes  [n] No'),
       ]),

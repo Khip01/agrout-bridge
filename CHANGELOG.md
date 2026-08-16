@@ -4,6 +4,18 @@
 
 ### Fix
 
+- **TUI update now closes only the TUI, then tells the user to run
+  `agrout-bridge update`.**
+  - The previous design spawned the update as a detached child and called
+    `shutdownApp(0)`, which maps to `exit(0)` in nocterm: the whole process
+    died, the child was unreliable, and earlier a plain `await
+    _proxy.stop()` present in the first version froze the TUI while an SSE
+    stream was active.
+  - Now `[Shift+U]` confirm uses `TerminalBinding.instance.shutdown()`
+    (restores the terminal without exiting), `main.dart` prints
+    `agrout-bridge update` and exits normally, and the standalone update
+    command replaces the binary from a stable process. The TUI no longer
+    attempts an in-process update.
 - **In-TUI update no longer freezes or prints a doubled version.**
   - The confirm dialog and update notice showed `-> vv0.1.21`: `_updateTag`
     already carries the leading `v` (it is the GitHub tag), so the extra `v`
