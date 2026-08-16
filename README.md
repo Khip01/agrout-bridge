@@ -18,7 +18,7 @@ TUI for daemon / Docker usage.
 - Single-key profile: API key stored via `profile add` (CLI) or `login` (web page), one active
 - TUI dashboard: profile, usage/cost, models, proxy config, log side panel
 - Headless `--server` mode for daemon / Docker
-- Self-update via GitHub Release `.tgz`
+- Self-update via `latest.json` (CDN-served) + GitHub Release `.tgz`
 - Optional inbound `PROXY_AUTH_TOKEN` for remote bind
 - 429/QPS-aware retry with exponential backoff
 - Content-blocked mitigation: strips base64 data URIs / `kix.` element IDs
@@ -36,7 +36,8 @@ npm install -g ./agrout-bridge-vX.Y.Z.tgz
 agrout-bridge run
 ```
 
-Update when a new release is available:
+Update when a new release is available (latest version is discovered from a
+CDN-served `latest.json`, checked in the background):
 
 ```bash
 agrout-bridge update

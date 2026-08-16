@@ -30,7 +30,7 @@ agrout-bridge/
 │       │   ├── login.dart          # Local sign-in server (paste API key, validate /v1/models)
 │       │   ├── usage_store.dart    # Aggregated usage + cost from response billing
 │       │   ├── log_store.dart      # JSONL activity log (2000 entries)
-│       │   └── updater.dart        # Self-update: API cache + download .tgz + npm install -g
+│       │   └── updater.dart        # Self-update: latest.json CDN + Tags API fallback, download .tgz + npm install -g
 │       ├── server/
 │       │   ├── server_controller.dart # HTTP server + routing
 │       │   ├── proxy.dart          # Forward + WAF capture + usage extraction
@@ -203,4 +203,4 @@ sign-in.
 | `~/.config/agrout-bridge/config.json` | `0600` | port, listen address, active profile id, optional proxy auth token |
 | `~/.config/agrout-bridge/profiles.json` | `0600` | list of `{id, name, apiKey, createdAt, apiKeyAt?, wafCookies, modelCache}` |
 | `~/.config/agrout-bridge/logs.jsonl` | normal | JSONL activity log (2000 entry cap, oldest evicted) |
-| `~/.config/agrout-bridge/update-cache.json` | normal | last seen `releases/latest` tag + timestamp (1h TTL) |
+| `~/.config/agrout-bridge/update-cache.json` | normal | last seen stable tag + timestamp (5m TTL), resolved from CDN `latest.json` |

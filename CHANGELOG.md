@@ -4,6 +4,13 @@
 
 ### Fix
 
+- **Update checks are now CDN-backed and dynamic.** The latest stable tag is
+  resolved from a `latest.json` file served by jsDelivr (falling back to
+  raw.githubusercontent.com) instead of always hitting the rate-limited
+  GitHub Tags API. The local cache TTL drops from 1h to 5 minutes, and each
+  real release bumps `latest.json` alongside `package.json`. Deleting or
+  re-rolling a release now clears the `Update Available` badge within
+  minutes instead of holding a dead cache entry for an hour.
 - **TUI update dialog exits exactly like quit.** The update flow previously
   used `TerminalBinding.instance.shutdown()`, which clears the alternate
   screen and later exits, leaving the shell looking "cleared" compared to a

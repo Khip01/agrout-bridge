@@ -72,7 +72,7 @@ agrout-bridge/
 │       │   ├── login.dart          # Local sign-in server (paste API key, validate /v1/models)
 │       │   ├── usage_store.dart    # Aggregated usage + cost from response billing
 │       │   ├── log_store.dart      # JSONL activity log
-│       │   └── updater.dart        # Self-update: API cache + download .tgz + npm install -g
+│       │   └── updater.dart        # Self-update: latest.json CDN + Tags API fallback, download .tgz + npm install -g
 │       ├── server/
 │       │   ├── server_controller.dart # HTTP server + routing
 │       │   ├── openai_handler.dart    # OpenAI-compatible proxy
@@ -97,6 +97,7 @@ agrout-bridge/
 ├── CHANGELOG.md
 ├── README.md
 ├── package.json
+├── latest.json                     # Mirrors newest stable tag; update checks via CDN
 ├── pubspec.yaml
 ├── build / run                     # Linux/macOS scripts
 ├── build.bat / run.bat             # Windows batch scripts
@@ -172,6 +173,23 @@ Triggered by pushing a tag matching `v*` or `[0-9]*`:
 
 Stable releases exclude tags with `-rc`, `-beta`, `-alpha`. Prerelease tags
 produce binaries but skip packaging and release jobs.
+
+### Update discovery (`latest.json`)
+
+The bridge resolves the newest stable tag from a `latest.json` file at the
+repo root, served by jsDelivr CDN (`cdn.jsdelivr.net/gh/Khip01/agrout-bridge@main/latest.json`)
+and falling back to `raw.githubusercontent.com`, then to the GitHub Tags
+API. The file mirrors the latest *published* release, so deleting a release
+stops the badge within the 5-minute local cache TTL. Rules:
+
+- **Real release:** bump `latest.json` (`{"tag":"vX.Y.Z"}`) in the same
+  commit as `package.json` and the tag.
+- **Dummy/test release (fake version for update testing):** NEVER touch
+  `latest.json`. The dummy tarball may be released, but the badge only
+  appears if `latest.json` actually points at it. This is what makes the
+  badge dynamic and immune to re-rolled dummies.
+- The standalone `update` command always uses `forceRefresh` so it reflects
+  upstream truth immediately; the TUI badge uses the 5-minute cache.
 
 ### Post-release validation
 
@@ -427,5 +445,8 @@ When making changes to this project, the AI agent must:
    (`agrout-bridge-vX.Y.Z.tgz`) and to validate the `--version` intercept in
    `bin/agrout-bridge.js`. A mismatched version produces a tarball that does
    not match its tag. Do not skip this.
+4. **Sync `latest.json` with the same stable tag** (`{"tag":"vX.Y.Z"}`) so
+   update checks resolve it. Dummy test releases must NOT touch
+   `latest.json`; only real releases bump it (see "Update discovery").
 4. Never commit API keys, session tokens, or any `~/.config/agrout-bridge/`
    artifact (API keys are the credential now; session tokens no longer exist).
