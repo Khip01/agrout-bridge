@@ -235,10 +235,15 @@ class BrowserRegistry {
       _ => <String>[],
     };
     final pathEnv = Platform.environment['PATH'] ?? '';
-    for (final dir in pathEnv.split(Platform.pathSeparator)) {
+    // PATH entries are separated with ':' on Unix and ';' on Windows, which
+    // is NOT the same as [Platform.pathSeparator] ('/'), so split carefully.
+    final pathSep = Platform.isWindows ? ';' : ':';
+    for (final dir in pathEnv.split(pathSep)) {
       for (final name in names) {
-        final candidate = '$dir${Platform.pathSeparator}'
-            '${Platform.isWindows ? '$name.exe' : name}';
+        final candidate = dir.isEmpty
+            ? name
+            : '$dir${Platform.pathSeparator}'
+                '${Platform.isWindows ? '$name.exe' : name}';
         if (File(candidate).existsSync()) return candidate;
       }
     }
