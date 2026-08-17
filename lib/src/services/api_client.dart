@@ -225,4 +225,39 @@ class AgentRouterClient {
     );
   }
 
+  // ── Public (no auth) endpoints ─────────────────────────────────────
+
+  /// `GET /api/status`: the New API status/config blob. Exposes the OAuth
+  /// client ids the login buttons need (`github_client_id`,
+  /// `linuxdo_client_id`) with no session required.
+  Future<Map<String, dynamic>> fetchStatus() async {
+    final req = await _http.getUrl(Uri.parse('$baseUrl/api/status'));
+    req.headers.set('Accept', 'application/json');
+    return _decodeJsonResponse(await req.close());
+  }
+
+  /// `GET /api/oauth/state?mode=login`: fetch a fresh OAuth `state` token.
+  /// Public (no auth); the login page calls it before redirecting to the
+  /// provider, so the daily-claim flow can build the same authorize URL.
+  Future<String> fetchOauthState() async {
+    final req = await _http.getUrl(Uri.parse('$baseUrl/api/oauth/state?mode=login'));
+    req.headers.set('Accept', 'application/json');
+    final json = await _decodeJsonResponse(await req.close());
+    final data = json['data'];
+    if (data is! String || data.isEmpty) {
+      throw HttpException('oauth state: expected string data');
+    }
+    return data;
+  }
+
+  Future<Map<String, dynamic>> _decodeJsonResponse(HttpClientResponse resp) async {
+    final raw = await resp.transform(utf8.decoder).join();
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      throw HttpException('GET failed: ${resp.statusCode} $raw');
+    }
+    final parsed = jsonDecode(raw);
+    if (parsed is! Map) throw HttpException('expected JSON object, got ${parsed.runtimeType}');
+    return parsed.cast<String, dynamic>();
+  }
+
 }

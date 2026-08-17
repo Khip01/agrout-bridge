@@ -40,6 +40,18 @@ void main() {
       expect(restored.trimSystemPrompt, isTrue);
     });
 
+    test('dailyClaimDoneDate roundtrips and is omitted when null', () {
+      final cfg = AppConfig(dailyClaimDoneDate: '2026-08-17');
+      final json = cfg.toJson();
+      expect(json['dailyClaimDoneDate'], '2026-08-17');
+      expect(AppConfig.fromJson(json).dailyClaimDoneDate, '2026-08-17');
+
+      final noDate = AppConfig();
+      final noDateJson = noDate.toJson();
+      expect(noDateJson.containsKey('dailyClaimDoneDate'), isFalse);
+      expect(AppConfig.fromJson(noDateJson).dailyClaimDoneDate, isNull);
+    });
+
     test('ConfigStore.save + load roundtrip persists to 0600 on unix', () {
       _useTempDir(_newTempDir());
 

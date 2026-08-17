@@ -6,6 +6,7 @@ import 'package:nocterm/nocterm.dart' hide LogEntry, Clipboard;
 import '../models/profile.dart';
 import '../models/version.dart';
 import '../services/api_client.dart';
+import '../services/daily_claim.dart';
 import '../services/login.dart';
 import '../services/log_store.dart';
 import '../services/updater.dart';
@@ -39,7 +40,7 @@ class AgroutApp extends StatefulComponent {
   State<AgroutApp> createState() => AppState();
 }
 
-enum _Panel { main, help, quit, login, portConfig, deleteConfirm, updateConfirm }
+enum _Panel { main, help, quit, login, portConfig, deleteConfirm, updateConfirm, dailyClaim }
 
 enum _InfoPage { profile, usage, models, proxy }
 
@@ -58,6 +59,10 @@ enum _LoginState { idle, loading, success, failed }
 /// convention: grey = disabled. The new port must be tested ([t] test) before
 /// it can be saved ([Enter] save).
 enum _PortState { idle, testing, success, failed }
+
+/// Daily-claim dialog sub-stages. [provider] is the arrow-navigated picker
+/// (GitHub / LinuxDO); [url] shows the login URL with [c]/[o]/[Esc]/[Enter].
+enum _DailyStage { provider, url }
 
 class AppState extends State<AgroutApp> {
   late final _profiles = component.profileStore;
@@ -97,6 +102,17 @@ class AppState extends State<AgroutApp> {
   _LoginState _loginState = _LoginState.idle;
   /// Reason text shown in red when `_loginState == _LoginState.failed`.
   String? _loginError;
+
+  // ── Daily claim dialog state ───────────────────────────────────────
+  /// Which sub-dialog is showing: provider picker (GitHub/LinuxDO) or the
+  /// resulting login URL with its 4-key keymap.
+  _DailyStage _dailyStage = _DailyStage.provider;
+  /// 0 = GitHub, 1 = LinuxDO (selection in the provider picker).
+  int _dailyProviderIndex = 0;
+  /// The authorize URL for the picked provider, once fetched.
+  String? _dailyUrl;
+  /// True while fetching the OAuth state + client id.
+  bool _dailyLoading = false;
 
   final _infoScrollCtrl = ScrollController();
   final _logScrollCtrl = ScrollController();
@@ -293,6 +309,65 @@ class AppState extends State<AgroutApp> {
       }
       return false;
     }
+    if (_panel == _Panel.dailyClaim) {
+      if (_dailyStage == _DailyStage.provider) {
+        // Provider picker: up/down move, Enter picks, Esc cancels.
+        if (e.logicalKey == LogicalKey.arrowUp && _dailyProviderIndex > 0) {
+          _dailyProviderIndex--;
+          setState(() {});
+          return true;
+        }
+        if (e.logicalKey == LogicalKey.arrowDown && _dailyProviderIndex < _dailyProviders.length - 1) {
+          _dailyProviderIndex++;
+          setState(() {});
+          return true;
+        }
+        if (e.logicalKey == LogicalKey.enter) {
+          unawaited(_dailySelectProvider());
+          return true;
+        }
+        if (e.logicalKey == LogicalKey.escape) {
+          _panel = _Panel.main;
+          _startPageRefresh();
+          setState(() {});
+          return true;
+        }
+        return false;
+      }
+      // URL stage: [c] copy, [o] open in browser, [Esc] back, [Enter] done.
+      if (e.logicalKey == LogicalKey.keyC && !e.isControlPressed) {
+        final url = _dailyUrl;
+        if (url != null) {
+          unawaited(Clipboard.copy(url));
+          _setStatus('Copied claim URL to clipboard', duration: 3);
+        }
+        return true;
+      }
+      if (e.logicalKey == LogicalKey.keyO && !e.isControlPressed) {
+        final url = _dailyUrl;
+        if (url != null) {
+          unawaited(openInBrowser(url).then((ok) {
+            if (ok) {
+              _setStatus('Opened claim URL in your browser', duration: 4);
+            } else {
+              _setStatus('Could not open a browser, copy the URL with [c]', duration: 4);
+            }
+          }));
+        }
+        return true;
+      }
+      if (e.logicalKey == LogicalKey.escape) {
+        _dailyStage = _DailyStage.provider;
+        _dailyUrl = null;
+        setState(() {});
+        return true;
+      }
+      if (e.logicalKey == LogicalKey.enter) {
+        _dailyMarkDone();
+        return true;
+      }
+      return false;
+    }
     // Main panel keymap.
     if (e.logicalKey == LogicalKey.keyC && e.isControlPressed) {
       _setStatus('Use [q] to quit', duration: 3);
@@ -314,6 +389,11 @@ class AppState extends State<AgroutApp> {
     if (e.logicalKey == LogicalKey.keyA) { _copyEndpoint(openai: false); return true; }
     if (e.logicalKey == LogicalKey.keyP) { _openPortConfig(); return true; }
     if (e.logicalKey == LogicalKey.keyL) { _openLoginPanel(); return true; }
+    if (e.logicalKey == LogicalKey.keyC && !e.isControlPressed) { _openDailyClaim(); return true; }
+    if (e.logicalKey == LogicalKey.keyM && e.isShiftPressed && !e.isControlPressed) {
+      _dailyMarkDone();
+      return true;
+    }
     if (e.logicalKey == LogicalKey.keyU && e.isShiftPressed && !e.isControlPressed) {
       if (_updateTag != null) {
         _askUpdate();
@@ -644,6 +724,17 @@ class AppState extends State<AgroutApp> {
       child: Row(
         children: [
           Text('agrout-bridge v$bridgeVersion', style: TextStyle(color: Colors.cyan)),
+          if (!_dailyDoneToday) ...[
+            Text('   ', style: const TextStyle(color: Colors.grey)),
+            Text(
+              'Daily Claim!',
+              style: const TextStyle(
+                color: Color(0xFFFFD75E), // bright amber, matches update badge
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Text('  [Shift+M] mark as done', style: const TextStyle(color: Colors.grey)),
+          ],
           if (_updateTag != null) ...[
             Text('   ', style: const TextStyle(color: Colors.grey)),
             Text(
@@ -694,6 +785,7 @@ class AppState extends State<AgroutApp> {
     if (_panel == _Panel.updateConfirm) return _updateConfirmPanel();
     if (_panel == _Panel.login) return _loginPanel();
     if (_panel == _Panel.portConfig) return _portConfigPanel();
+    if (_panel == _Panel.dailyClaim) return _dailyClaimPanel();
 
     final content = _buildContent();
     if (_logFullscreen && _showLog) {
@@ -793,8 +885,6 @@ class AppState extends State<AgroutApp> {
         ),
     ];
   }
-
-  bool get _hasNoKey => _profiles.all.isEmpty || _profiles.all.every((p) => p.apiKey.isEmpty);
 
   String _fmtLimit(dynamic v) {
     if (v is! num) return '-';
@@ -1029,22 +1119,27 @@ class AppState extends State<AgroutApp> {
 
   // ── Footer ────────────────────────────────────────────────────────
   Component _buildFooter() {
+    // Global keymap renders as plain text by design: only the daily-claim
+    // entry is emboldened, and only while it still needs claiming today.
     final base = TextStyle(color: Colors.grey);
-    final navStyle = TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold);
-    final actionStyle = TextStyle(color: const Color(0xFF8BD4BA), fontWeight: FontWeight.bold); // soft green
-    final cfgStyle = TextStyle(color: const Color(0xFFD19A66)); // amber
-    final updateStyle = TextStyle(color: const Color(0xFFFFD75E), fontWeight: FontWeight.bold); // bright amber, matches badge
-    final infoStyle = TextStyle(color: const Color(0xFF5BA4F5), fontWeight: FontWeight.bold); // info blue
-    final dangerStyle = TextStyle(color: const Color(0xFFFF6B6B), fontWeight: FontWeight.bold); // bright red
-    final ctrlStyle = TextStyle(color: const Color(0xFF9C8FFF), fontWeight: FontWeight.bold); // violet, distinct from nav/action
+    final dailyKey = _dailyDoneToday
+        ? base
+        : const TextStyle(color: Color(0xFFFFD75E), fontWeight: FontWeight.bold);
+    final dailyLabel = _dailyDoneToday
+        ? base
+        : const TextStyle(color: Color(0xFFD19A66), fontWeight: FontWeight.bold);
     if (_panel != _Panel.main) {
       final hint = _panel == _Panel.login
           ? '[c] copy URL | [Esc] close'
-          : _panel == _Panel.deleteConfirm
-              ? '[y] confirm  [n] cancel'
-              : _panel == _Panel.updateConfirm
-                  ? '[c] copy cmd   [y] close   [n] back'
-                  : '[Esc] back';
+          : _panel == _Panel.dailyClaim
+              ? (_dailyStage == _DailyStage.provider
+                  ? '[up/down] move   [Enter] select   [Esc] cancel'
+                  : '[c] copy URL   [o] open in browser   [Esc] back   [Enter] done')
+              : _panel == _Panel.deleteConfirm
+                  ? '[y] confirm  [n] cancel'
+                  : _panel == _Panel.updateConfirm
+                      ? '[c] copy cmd   [y] close   [n] back'
+                      : '[Esc] back';
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 1),
         child: Text(' $hint', style: base),
@@ -1053,33 +1148,17 @@ class AppState extends State<AgroutApp> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 1),
       child: Row(children: [
-        Text('[1-4] ', style: navStyle),
-        Text('page  ', style: navStyle),
-        Text('[r] ', style: actionStyle),
-        Text('refresh  ', style: actionStyle),
-        Text('[o]/[a] ', style: actionStyle),
-        Text('copy endpoint  ', style: actionStyle),
-        Text('[p] ', style: cfgStyle),
-        Text('port  ', style: cfgStyle),
-        if (_hasNoKey)
-          Text('[l] ', style: actionStyle)
-        else
-          Text('[l] ', style: cfgStyle),
-        Text('login  ', style: _hasNoKey ? actionStyle : cfgStyle),
-        if (_updateTag != null)
-          Text('[Shift+U] ', style: updateStyle)
-        else
-          const Text(''),
-        if (_updateTag != null)
-          Text('update  ', style: updateStyle)
-        else
-          const Text(''),
-        Text('[h] ', style: infoStyle),
-        Text('help  ', style: infoStyle),
-        Text('[q] ', style: dangerStyle),
-        Text('quit  ', style: dangerStyle),
-        Text('[Ctrl+L] ', style: ctrlStyle),
-        Text('log', style: ctrlStyle),
+        Text('[1-4] page  ', style: base),
+        Text('[r] refresh  ', style: base),
+        Text('[o]/[a] copy endpoint  ', style: base),
+        Text('[p] port  ', style: base),
+        Text('[l] login  ', style: base),
+        if (_updateTag != null) Text('[Shift+U] update  ', style: base),
+        Text('[c] ', style: dailyKey),
+        Text('daily  ', style: dailyLabel),
+        Text('[h] help  ', style: base),
+        Text('[q] quit  ', style: base),
+        Text('[Ctrl+L] log', style: base),
         ..._pageScopedFooter(base),
       ]),
     );
@@ -1168,8 +1247,8 @@ class AppState extends State<AgroutApp> {
         Text(fullscreen ? ' LOG (fullscreen)' : ' LOG', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF9C8FFF))),
         const Spacer(),
         if (!fullscreen) const Text('[f]ull ', style: TextStyle(color: Color(0xFF9C8FFF))),
-        const Text('[C]lear ', style: TextStyle(color: Color(0xFF9C8FFF))),
-        const Text('[O]ld ', style: TextStyle(color: Color(0xFF9C8FFF))),
+        const Text('[Shift+C]lear ', style: TextStyle(color: Color(0xFF9C8FFF))),
+        const Text('[Shift+O]ld ', style: TextStyle(color: Color(0xFF9C8FFF))),
       ]),
       Container(height: 1, color: Colors.grey),
       if (_confirmClear != _ClearScope.none)
@@ -1283,6 +1362,8 @@ class AppState extends State<AgroutApp> {
     add('Other:', Colors.cyan);
     add('  [p]  Port configuration panel');
     add('  [l]  Open login URL (paste API key)');
+    add('  [c]  Daily claim (pick provider, copy/open the login URL)');
+    add('  [Shift+M]  Mark today\'s daily claim as done (hides the badge)');
     if (_updateTag != null) add('  [Shift+U]  Close bridge and suggest update to $_updateTag');
     add('  [h]  Help');
     add('  [q]  Quit');
@@ -1653,6 +1734,118 @@ class AppState extends State<AgroutApp> {
     _panel = _Panel.main;
     _startPageRefresh();
     setState(() {});
+  }
+
+  // ── Daily claim dialog ─────────────────────────────────────────────
+  static const _dailyProviders = [DailyProvider.github, DailyProvider.linuxdo];
+
+  String _dailyProviderLabel(DailyProvider p) =>
+      p == DailyProvider.github ? 'GitHub' : 'LinuxDO';
+
+  /// True when the current local day has been marked done for the AgentRouter
+  /// daily claim. Drives the header badge and the footer bold state; because
+  /// the header/footer re-render every second, a new day shows the badge
+  /// automatically as the clock crosses midnight.
+  bool get _dailyDoneToday =>
+      _config.config.dailyClaimDoneDate == _todayStamp();
+
+  String _todayStamp() {
+    final d = DateTime.now();
+    return '${d.year.toString().padLeft(4, '0')}-'
+        '${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
+  }
+
+  /// `[c]` (main): open the daily-claim dialog at the provider picker.
+  void _openDailyClaim() {
+    _dailyStage = _DailyStage.provider;
+    _dailyProviderIndex = 0;
+    _dailyUrl = null;
+    _dailyLoading = false;
+    _panel = _Panel.dailyClaim;
+    setState(() {});
+  }
+
+  /// Enter on the provider picker: fetch the login URL for the picked
+  /// provider and advance to the URL stage.
+  Future<void> _dailySelectProvider() async {
+    final provider = _dailyProviders[_dailyProviderIndex];
+    _dailyStage = _DailyStage.url;
+    _dailyUrl = null;
+    _dailyLoading = true;
+    setState(() {});
+    final client = AgentRouterClient();
+    try {
+      final url = await DailyClaim(client).buildUrl(provider);
+      _dailyUrl = url;
+    } finally {
+      client.close();
+      _dailyLoading = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  /// Mark today's daily claim as done (persisted in config), clear the badge
+  /// and the footer bold, and close the dialog when triggered from it.
+  void _dailyMarkDone() {
+    _config.config.dailyClaimDoneDate = _todayStamp();
+    _config.save();
+    LogStore.info('Daily claim marked as done for today');
+    if (_panel == _Panel.dailyClaim) {
+      _panel = _Panel.main;
+      _startPageRefresh();
+    }
+    setState(() {});
+    _setStatus('Daily claim marked as done', duration: 3);
+  }
+
+  Component _dailyClaimPanel() {
+    if (_dailyStage == _DailyStage.provider) {
+      return Center(child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(border: BoxBorder.all(color: const Color(0xFFFFD75E))),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('Daily claim', style: TextStyle(color: Color(0xFFFFD75E), fontWeight: FontWeight.bold)),
+          const SizedBox(height: 1),
+          const Text('How did you sign up to AgentRouter?'),
+          const SizedBox(height: 1),
+          for (var i = 0; i < _dailyProviders.length; i++)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: Text(
+                '${i == _dailyProviderIndex ? '▸ ' : '  '}${_dailyProviderLabel(_dailyProviders[i])}',
+                style: i == _dailyProviderIndex
+                    ? const TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold)
+                    : const TextStyle(color: Colors.grey),
+              ),
+            ),
+          const SizedBox(height: 1),
+          const Text('[up/down] move   [Enter] select   [Esc] cancel',
+              style: TextStyle(color: Colors.grey)),
+        ]),
+      ));
+    }
+    final url = _dailyUrl;
+    final label = _dailyProviderLabel(_dailyProviders[_dailyProviderIndex]);
+    return Center(child: Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(border: BoxBorder.all(color: const Color(0xFFD19A66))),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('Daily claim - $label',
+            style: const TextStyle(color: Color(0xFFD19A66), fontWeight: FontWeight.bold)),
+        const SizedBox(height: 1),
+        if (_dailyLoading)
+          const Text('Fetching login URL...', style: TextStyle(color: Colors.grey))
+        else
+          Text(url ?? '(unavailable)', style: const TextStyle(color: Color(0xFF8BD4BA))),
+        const SizedBox(height: 1),
+        const Text('Open it in your browser and sign in to claim today\'s quota.',
+            style: TextStyle(color: Colors.grey)),
+        const SizedBox(height: 1),
+        const Text('[c] copy URL   [o] open in browser   [Esc] back   [Enter] done',
+            style: TextStyle(color: Colors.grey)),
+      ]),
+    ));
   }
 
    Component _loginPanel() {

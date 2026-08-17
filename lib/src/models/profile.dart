@@ -101,12 +101,19 @@ class AppConfig {
   /// a specific deployment needs the old v0.1.6 behavior.
   bool trimSystemPrompt;
 
+  /// Local date (`YYYY-MM-DD`) of the last day the user marked the AgentRouter
+  /// daily claim as done. When it no longer matches today, the TUI shows the
+  /// `Daily Claim!` badge again until `[Shift+M]` / the claim dialog marks the
+  /// new day as done.
+  String? dailyClaimDoneDate;
+
   AppConfig({
     this.serverPort = defaultPort,
     this.listenAddress = defaultListenAddress,
     this.activeProfileId,
     this.proxyAuthToken = '',
     this.trimSystemPrompt = false,
+    this.dailyClaimDoneDate,
   });
 
   Map<String, dynamic> toJson() => {
@@ -115,6 +122,7 @@ class AppConfig {
         if (activeProfileId != null) 'activeProfileId': activeProfileId,
         'proxyAuthToken': proxyAuthToken,
         'trimSystemPrompt': trimSystemPrompt,
+        if (dailyClaimDoneDate != null) 'dailyClaimDoneDate': dailyClaimDoneDate,
       };
 
   factory AppConfig.fromJson(Map<String, dynamic> json) => AppConfig(
@@ -123,6 +131,7 @@ class AppConfig {
         activeProfileId: json['activeProfileId'] as String?,
         proxyAuthToken: json['proxyAuthToken'] as String? ?? '',
         trimSystemPrompt: json['trimSystemPrompt'] as bool? ?? false,
+        dailyClaimDoneDate: json['dailyClaimDoneDate'] as String?,
       );
 }
 

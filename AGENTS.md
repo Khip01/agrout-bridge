@@ -70,6 +70,7 @@ agrout-bridge/
 │       │   ├── waf.dart            # WAF cookie jar (warmup, capture, merge, persist)
 │       │   ├── api_client.dart     # AgentRouter HTTP (New API endpoints)
 │       │   ├── login.dart          # Local sign-in server (paste API key, validate /v1/models)
+│       │   ├── daily_claim.dart    # Daily-claim OAuth URL builder + default-browser opener
 │       │   ├── usage_store.dart    # Aggregated usage + cost from response billing
 │       │   ├── log_store.dart      # JSONL activity log
 │       │   └── updater.dart        # Self-update: latest.json CDN + Tags API fallback, download .tgz + npm install -g
@@ -409,6 +410,8 @@ with `package.json` when bumping a release.
 | `p` | Main | Port configuration panel |
 | `t` | Port config | Test the new port before saving (`[Enter]` save disabled until it succeeds) |
 | `l` | Main | Login panel (paste API key) |
+| `c` | Main | Daily claim dialog (pick GitHub/LinuxDO, copy/open the claim URL) |
+| `Shift+M` | Main | Mark today's daily claim as done (clears the header badge and footer bold) |
 | `Shift+U` | Main | Open update dialog: `[c]` copy command, `[y]` exit like quit (shown when a newer stable exists) |
 | `h` | Main | Help panel |
 | `q` | Main | Quit confirmation |
@@ -421,6 +424,13 @@ with `package.json` when bumping a release.
 | `up/down` | Models page | Move the model highlight |
 | `Enter` | Models page | Copy selected model id |
 | `PgUp/PgDn` | Models page | Scroll the model list by 10 lines |
+| `up/down` | Daily claim (picker) | Move between GitHub / LinuxDO |
+| `Enter` | Daily claim (picker) | Pick the provider and show its claim URL |
+| `Esc` | Daily claim (picker) | Close the dialog |
+| `c` | Daily claim (URL) | Copy the claim URL to clipboard |
+| `o` | Daily claim (URL) | Open the claim URL in the default browser |
+| `Esc` | Daily claim (URL) | Back to the provider picker |
+| `Enter` | Daily claim (URL) | Mark today's claim done and close the dialog |
 | `Ctrl+L` | Main | Toggle log side panel |
 | `f` | Log open | Toggle log fullscreen / side panel |
 | `Shift+C` | Log open | Clear all log entries (Y/N confirmation) |

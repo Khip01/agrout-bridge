@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Feat
+
+- **Daily Claim dialog (`[c]`).** A new global keymap opens a two-stage
+  dialog for the AgentRouter daily quota. Stage one picks the sign-up
+  provider (GitHub / LinuxDO, arrow keys + Enter, Esc cancels). Stage two
+  shows the live OAuth authorize URL built from `GET /api/oauth/state` and
+  the public client ids in `GET /api/status`: `[c]` copies it, `[o]` opens
+  it in the default browser (where the user is already signed in, so the
+  claim completes in one click), `[Esc]` returns to the picker, and
+  `[Enter]` marks the day as done and closes the dialog.
+- **Daily Claim header badge.** When today has not been claimed yet, the
+  header shows `Daily Claim!  [Shift+M] mark as done` next to the version.
+  The badge appears automatically as the clock crosses 00:00 (the header
+  re-renders every second), and `[Shift+M]` (or `[Enter]` on the URL
+  dialog) marks the day done: the badge clears and the footer `[c] daily`
+  entry stops being bold until the next day.
+
+### Fix
+
+- **Global footer keymap is plain text.** Only the `[c] daily` entry is
+  emboldened, and only while that day's claim is still pending; once marked
+  done it renders like every other key. The log panel labels now spell out
+  the modifier: `[Shift+C]lear` and `[Shift+O]ld`.
+
 ## v0.1.21 (2026-08-16)
 
 ### Fix
