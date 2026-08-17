@@ -32,6 +32,11 @@ class PlaywrightBootstrap {
     return dirs.isEmpty ? null : dirs.first.path;
   }
 
+  /// True when a driver dir already exists (i.e. a previous `ensure()` or
+  /// `setup-automation` run completed). Used by the TUI to decide whether to
+  /// show the install prompt or go straight to the browser picker.
+  static bool isReady() => _latestDriverDir() != null;
+
   /// Ensure the runtime is ready. Downloads the driver on first call (blocking
   /// while it assembles, typically tens of seconds to a few minutes), then
   /// marks browsers as installed so playwright_dart never fetches browser

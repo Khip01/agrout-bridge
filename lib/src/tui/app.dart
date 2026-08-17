@@ -823,8 +823,7 @@ class AppState extends State<AgroutApp> {
     return found.isNotEmpty && Directory(cfg.profileDir!).existsSync();
   }
 
-  bool get _playwrightReady => Directory('${configDir()}${Platform.pathSeparator}playwright')
-      .existsSync();
+  bool get _playwrightReady => PlaywrightBootstrap.isReady();
 
   /// Show the browser picker (all detected browsers), or fall back to a
   /// status message when none are installed.
@@ -855,8 +854,6 @@ class AppState extends State<AgroutApp> {
       try {
         await PlaywrightBootstrap.ensure(
             onProgress: (m) => _setClaimProgress(m));
-        Directory('${configDir()}${Platform.pathSeparator}playwright')
-            .createSync(recursive: true);
         _claimRunning = false;
         if (mounted) {
           _pickBrowser();
@@ -864,7 +861,8 @@ class AppState extends State<AgroutApp> {
         }
       } catch (e) {
         _claimRunning = false;
-        _dailyStep = _DailyStep.status;
+        _dailyStep = _DailyStep.done;
+        _lastAttempt = DailyClaimAttempt(success: false, message: '$e');
         _dailyResult = ClaimCheckResult.unknown('install failed: $e');
         if (mounted) setState(() {});
       }
@@ -916,9 +914,12 @@ class AppState extends State<AgroutApp> {
       cfg.browser = null;
       cfg.profileDir = null;
       _config.save();
-      _dailyResult = ClaimCheckResult.unknown(
-          'browser ${browser?.id ?? '?'} is no longer installed; pick again');
-      _dailyStep = _DailyStep.status;
+      final reason = 'browser ${browser?.id ?? '?'} is no longer installed; '
+          'pick again';
+      _dailyResult = ClaimCheckResult.unknown(reason);
+      _lastAttempt = DailyClaimAttempt(success: false, message: reason);
+      LogStore.info('Daily claim: $reason');
+      _dailyStep = _DailyStep.done;
       setState(() {});
       return;
     }
@@ -1042,8 +1043,12 @@ class AppState extends State<AgroutApp> {
         msgColor = blue;
       } else {
         title = 'Could not check automatically.';
-        msg = 'Press [a] below to open the automatic claim once. '
-            'It will use your own browser; nothing leaves your machine.';
+        // Show the real reason instead of a canned message, so the user
+        // knows exactly why (e.g. browser not installed, no API key).
+        msg = resolved.detail.isEmpty
+            ? 'Press [a] below to open the automatic claim once. '
+                'It will use your own browser; nothing leaves your machine.'
+            : '"${resolved.detail}"';
         msgColor = const Color(0xFFFF8A8A);
       }
       return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1070,11 +1075,16 @@ class AppState extends State<AgroutApp> {
             style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64B5F6))),
         const SizedBox(height: 1),
         const Text('To claim automatically, the bridge needs a small tool '
-            'installed once (about 50-80 MB). Your browser is reused, '
-            'no extra browser is downloaded.'),
+            'installed once. Download: about 50-80 MB, one time only. '
+            'Your browser is reused; no extra browser is downloaded.'),
+        const SizedBox(height: 1),
+        const Text('You can install it here, or outside the bridge by running:',
+            style: TextStyle(color: Color(0xFF8A8A8A))),
+        const Text('  agrout-bridge setup-automation',
+            style: TextStyle(color: Color(0xFFD0D0D0), fontWeight: FontWeight.bold)),
         const SizedBox(height: 1),
         const SizedBox(height: 1),
-        _keyHint('[y]', 'install'),
+        _keyHint('[y]', 'install now (watch progress here)'),
         _keyHint('[n]', 'not now'),
       ]);
     }

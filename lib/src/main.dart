@@ -8,6 +8,7 @@ import 'models/version.dart';
 import 'services/api_client.dart';
 import 'services/login.dart';
 import 'services/log_store.dart';
+import 'services/playwright_bootstrap.dart';
 import 'services/updater.dart';
 import 'server/server_controller.dart';
 import 'tui/app.dart';
@@ -23,6 +24,7 @@ Usage:
   agrout-bridge profile use <name>         Set the active profile
   agrout-bridge profile remove <name>      Delete a profile
   agrout-bridge update                     Download and install latest stable release
+  agrout-bridge setup-automation           One-time download of the daily-claim browser tool
   agrout-bridge help                       Show this help screen
   agrout-bridge -v, --version              Print version string
 ''';
@@ -60,6 +62,9 @@ Future<void> main(List<String> args) async {
         return;
       case 'update':
         await _updateCommand();
+        return;
+      case 'setup-automation':
+        await _setupAutomationCommand();
         return;
       default:
         _printUsageErr();
@@ -99,6 +104,25 @@ Future<void> _printUpdateNoticeIfAny() async {
     }
   } catch (_) {
     // Best-effort; never fail startup on a network blip.
+  }
+}
+
+/// One-time download of the browser-automation runtime, run OUTSIDE the TUI
+/// (like `update`). This avoids blocking the TUI while a 50-80 MB download
+/// runs and gives the user a plain progress line instead of an in-app
+/// spinner. Idempotent: safe to re-run.
+Future<void> _setupAutomationCommand() async {
+  stdout.writeln('Preparing the browser-automation tool (one-time)...');
+  stdout.writeln(PlaywrightBootstrap.describeDownload());
+  try {
+    await PlaywrightBootstrap.ensure(
+      onProgress: (m) => stdout.writeln('  $m'),
+    );
+    stdout.writeln('Done. You can now use [Shift+Q] -> [a] in the TUI to '
+        'claim your daily automatically.');
+  } catch (e) {
+    stderr.writeln('Setup failed: $e');
+    exit(1);
   }
 }
 
