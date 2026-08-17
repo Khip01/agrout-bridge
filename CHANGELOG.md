@@ -46,6 +46,16 @@
   appear once, in the footer, centered on the line, styled with the same
   bright-key/muted-label palette. The log header labels are spelled out:
   `[f] fullscreen`, `[Shift+C] clear all`, `[Shift+O] clear old only`.
+- **Update check can no longer be hidden by a stale cache.** Two fixes make
+  the badge reliable in both directions. First, `latest.json` is now read
+  from `raw.githubusercontent.com` before the jsDelivr CDN: jsDelivr can
+  serve a cached copy of the old tag for a while after a push, and as the
+  first source it could silently keep reporting "already up to date" when a
+  newer release existed. The raw file is always the freshly-pushed `main`
+  state, so it must win. Second, the local cache TTL drops to 1 minute, so
+  a stale entry cannot hide a new release for long, and a successful
+  `update` clears the cache so the next startup cannot show a phantom
+  "update available" for the tag that was just installed.
 - **Port-config panel keymap renders on one line.** The `[t] test`
   `[Enter] save` `[Esc] back` keymap was laid out as separate rows inside
   the panel (stacked vertically). It is now a single row with the shared

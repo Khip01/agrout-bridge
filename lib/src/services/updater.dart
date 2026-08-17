@@ -30,17 +30,25 @@ class Updater {
   static const _apiBase = 'https://api.github.com';
   static const _dlBase = 'https://github.com/$_owner/$_repo/releases/download';
 
-  /// `latest.json` mirrors the newest stable release tag. It is served from
-  /// CDN endpoints (jsDelivr, then raw.githubusercontent.com) instead of the
-  /// rate-limited GitHub API, so the check can refresh quickly and reflect
-  /// release deletions without hitting API limits.
+  /// `latest.json` mirrors the newest stable release tag. It is served by
+  /// plain-file endpoints (raw.githubusercontent.com first, then the jsDelivr
+  /// CDN) instead of the rate-limited GitHub API, so the check can refresh
+  /// quickly and reflect release deletions without hitting API limits.
+  ///
+  /// Order matters: raw.githubusercontent.com is always the freshly-pushed
+  /// `main` file, while jsDelivr is a CDN that can serve a cached copy for a
+  /// while after a push. The raw source must be checked first so a stale CDN
+  /// entry can never hide a newer release.
   static const _latestJsonSources = [
-    'https://cdn.jsdelivr.net/gh/$_owner/$_repo@main/latest.json',
     'https://raw.githubusercontent.com/$_owner/$_repo/main/latest.json',
+    'https://cdn.jsdelivr.net/gh/$_owner/$_repo@main/latest.json',
   ];
 
-  /// Short TTL so removals/re-rolls show up quickly.
-  static const _cacheTtlMs = 5 * 60 * 1000; // 5 minutes
+  /// Short TTL so a stale cache can never keep a new release hidden for long:
+  /// after a release the badge appears within a minute, and removals/re-rolls
+  /// clear quickly too. The primary source is a plain file (no GitHub API
+  /// rate limit), so refetching is cheap.
+  static const _cacheTtlMs = 60 * 1000; // 1 minute
 
   /// Suffixes that mark a tag as a prerelease (filtered out by the updater).
   static const _prereleaseMarkers = [
@@ -309,6 +317,9 @@ class Updater {
       if (result.exitCode != 0) {
         return UpdateResult.fail('npm install failed:\n${result.stderr}');
       }
+      // Drop the stale cache so the next startup cannot show an "update
+      // available" badge pointing at the tag we just installed.
+      clearCache();
       return UpdateResult.ok('Updated to $tag. Restart the bridge to apply.');
     } finally {
       try { tmpDir.deleteSync(recursive: true); } catch (_) {}

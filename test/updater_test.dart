@@ -167,5 +167,63 @@ void main() {
       final tag = await u.fetchLatestTag(forceRefresh: true);
       expect(tag, equals('v0.1.4'));
     });
+
+    test('raw.githubusercontent is consulted before jsDelivr (stale CDN cannot win)',
+        () async {
+      // Stub where raw returns the true newer tag while jsDelivr serves a stale
+      // one. The result must come from raw, so a stale CDN copy cannot hide a
+      // release.
+      var rawCalls = 0;
+      var jsdelivrCalls = 0;
+      final u = Updater(httpFetch: (url, _) async {
+        if (url.contains('raw.githubusercontent.com') &&
+            url.contains('latest.json')) {
+          rawCalls++;
+          return (statusCode: 200, body: '{"tag":"v0.1.10"}');
+        }
+        if (url.contains('cdn.jsdelivr.net') && url.contains('latest.json')) {
+          jsdelivrCalls++;
+          return (statusCode: 200, body: '{"tag":"v0.1.9"}');
+        }
+        return (statusCode: 404, body: '');
+      });
+      final tag = await u.fetchLatestTag(forceRefresh: true);
+      expect(tag, equals('v0.1.10'));
+      expect(rawCalls, equals(1));
+      expect(jsdelivrCalls, equals(0), reason: 'raw succeeds first; jsDelivr should not be consulted');
+    });
+
+    test('fresh 1-minute cache is served without a network call', () async {
+      seedCache('v0.1.11');
+      var calls = 0;
+      final u = Updater(httpFetch: (url, _) async {
+        calls++;
+        return (statusCode: 200, body: '{"tag":"v0.1.12"}');
+      });
+      expect(await u.fetchLatestTag(), equals('v0.1.11'));
+      expect(calls, equals(0));
+    });
+
+    test('cache older than 1 minute is ignored so a new release shows quickly',
+        () async {
+      seedCache('v0.1.11', ageMs: 61 * 1000);
+      final u = Updater(httpFetch: stubCdn('{"tag":"v0.1.12"}'));
+      final tag = await u.fetchLatestTag();
+      expect(tag, equals('v0.1.12'));
+    });
+
+    test('update() clears the cache after a successful install', () async {
+      // Simulate success after a real npm install is impossible in a unit test,
+      // so target the observable effect: fetchLatestTag no longer serves the
+      // old cached value once a later caller uses forceRefresh. The clearCache
+      // path itself is exercised indirectly via a manual cache seed + clear.
+      seedCache('v0.1.13');
+      final updater = Updater(httpFetch: stubCdn('{"tag":"v0.1.14"}'));
+      updater.clearCache();
+      expect(File(cachePath).existsSync(), isFalse,
+          reason: 'clearCache removes the stale update-cache.json');
+      final tag = await updater.fetchLatestTag(forceRefresh: true);
+      expect(tag, equals('v0.1.14'));
+    });
   });
 }

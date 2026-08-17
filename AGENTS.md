@@ -73,7 +73,7 @@ agrout-bridge/
 │       │   ├── daily_claim.dart    # Daily-claim OAuth URL builder + default-browser opener
 │       │   ├── usage_store.dart    # Aggregated usage + cost from response billing
 │       │   ├── log_store.dart      # JSONL activity log
-│       │   └── updater.dart        # Self-update: latest.json CDN + Tags API fallback, download .tgz + npm install -g
+│       │   └── updater.dart        # Self-update: latest.json (raw first, CDN fallback) + Tags API fallback, download .tgz + npm install -g
 │       ├── server/
 │       │   ├── server_controller.dart # HTTP server + routing
 │       │   ├── openai_handler.dart    # OpenAI-compatible proxy
@@ -178,10 +178,14 @@ produce binaries but skip packaging and release jobs.
 ### Update discovery (`latest.json`)
 
 The bridge resolves the newest stable tag from a `latest.json` file at the
-repo root, served by jsDelivr CDN (`cdn.jsdelivr.net/gh/Khip01/agrout-bridge@main/latest.json`)
-and falling back to `raw.githubusercontent.com`, then to the GitHub Tags
-API. The file mirrors the latest *published* release, so deleting a release
-stops the badge within the 5-minute local cache TTL. Rules:
+repo root, served by `raw.githubusercontent.com` FIRST (the freshly-pushed
+`main` file) and falling back to the jsDelivr CDN
+(`cdn.jsdelivr.net/gh/Khip01/agrout-bridge@main/latest.json`), then to the
+GitHub Tags API. The raw source must be checked before jsDelivr: jsDelivr
+can serve a stale cached copy after a push, and as the first source it
+would hide a newer release. The file mirrors the latest *published*
+release, so deleting a release stops the badge within the 1-minute local
+cache TTL. Rules:
 
 - **Real release:** bump `latest.json` (`{"tag":"vX.Y.Z"}`) in the same
   commit as `package.json` and the tag.
@@ -190,7 +194,9 @@ stops the badge within the 5-minute local cache TTL. Rules:
   appears if `latest.json` actually points at it. This is what makes the
   badge dynamic and immune to re-rolled dummies.
 - The standalone `update` command always uses `forceRefresh` so it reflects
-  upstream truth immediately; the TUI badge uses the 5-minute cache.
+  upstream truth immediately; the TUI badge uses the 1-minute cache. A
+  successful `update` clears the cache so no phantom "update available"
+  badge survives the install.
 
 ### Post-release validation
 
