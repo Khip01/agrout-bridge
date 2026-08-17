@@ -122,8 +122,10 @@ class DailyClaimDetector {
       }
       // The unlimited sentinel never moves, so a claim cannot be seen here.
       if (usd >= 100000000) {
-        return ClaimCheckResult.unknown('unlimited token sentinel, cannot '
-            'detect via billing');
+        return ClaimCheckResult.unknown(
+            'billing quota does not change for your key. '
+            'Run the automatic claim once to save your session so daily '
+            'claiming can be detected.');
       }
       final low = _config.expectedAmount - _config.tolerance;
       final high = _config.expectedAmount + _config.tolerance;

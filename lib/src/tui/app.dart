@@ -1019,7 +1019,11 @@ class AppState extends State<AgroutApp> {
         statusText = 'Not claimed today yet: ${resolved.detail}';
         statusColor = blue;
       } else {
-        statusText = 'Unknown: ${resolved.detail}';
+        // The `unknown` detail should read like an instruction, not internal
+        // jargon (e.g. when a shopping-limited key offers no billing signal).
+        statusText = resolved.detail.isEmpty
+            ? 'Could not check the claim automatically.'
+            : resolved.detail;
         statusColor = const Color(0xFFFF8A8A);
       }
       return Column(mainAxisSize: MainAxisSize.min, children: [
@@ -1032,6 +1036,11 @@ class AppState extends State<AgroutApp> {
         Text('Key: ${profile?.name ?? 'none'}'),
         const SizedBox(height: 1),
         Text(statusText, style: TextStyle(color: statusColor)),
+        if (resolved != null && resolved.isUnknown) ...[
+          const SizedBox(height: 1),
+          const Text('Press [a] to run the automatic claim once '
+              '(opens your browser).', style: TextStyle(color: Color(0xFFFFD75E))),
+        ],
         if (_dailyPendingConfirm) ...[
           const SizedBox(height: 1),
           const Text('Mark done only after you actually claimed in the browser.',
