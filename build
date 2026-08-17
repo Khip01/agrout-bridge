@@ -10,5 +10,5 @@ VERSION="$(node -p "require('./package.json').version")"
 echo "Getting dependencies..."
 dart pub get
 echo "Compiling (PACKAGE_VERSION=${VERSION})..."
-dart compile exe bin/agrout_bridge.dart -o bin-executables/app-linux --dart-define=PACKAGE_VERSION="${VERSION}"
+dart compile exe -D PACKAGE_VERSION="${VERSION}" bin/agrout_bridge.dart -o bin-executables/app-linux
 echo "Done! Binary at bin-executables/app-linux (v${VERSION})"
