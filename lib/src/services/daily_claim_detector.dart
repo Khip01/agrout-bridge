@@ -44,6 +44,30 @@ class DailyClaimDetector {
     return _checkQuota(apiKey: apiKey);
   }
 
+  /// Fetch the account's current quota (in USD) using a session cookie via
+  /// `GET /api/user/self`. Returns `null` when the session is invalid or the
+  /// endpoint errors. Used to show "credit before -> after" around a claim.
+  Future<double?> fetchQuotaWithSession({
+    required String apiKey,
+    required String sessionCookie,
+    required String newApiUserId,
+  }) async {
+    try {
+      final raw = await _fetch('/api/user/self', {
+        'Authorization': 'Bearer $apiKey',
+        'Cookie': 'session=$sessionCookie',
+        'New-API-User': newApiUserId,
+      });
+      final data = raw['data'];
+      if (data is! Map) return null;
+      final quota = (data['quota'] as num?)?.toInt();
+      if (quota == null) return null;
+      return quota / 500000.0; // QuotaPerUnit
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Authoritative check: read today's activity log entries. A `type=4`
   /// entry whose content contains a check-in marker means the claim fired.
   /// Returns null when the log path is unavailable (network error etc.).

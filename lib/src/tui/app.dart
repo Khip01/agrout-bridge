@@ -131,6 +131,7 @@ class AppState extends State<AgroutApp> {
   bool _claimSurface = false;
   String _claimProgress = '';
   double _quotaBefore = 0;
+  double? _quotaAfter;
   DailyClaimAttempt? _lastAttempt;
 
   static const _pageNames = ['Profile', 'Usage & Cost', 'Models', 'Proxy Config'];
@@ -783,14 +784,26 @@ class AppState extends State<AgroutApp> {
   // ── Daily claim: browser automation flow ───────────────────────────
 
   /// Entry point for `[a]` (auto claim). Drives the install -> browser ->
-  /// mode -> run state machine. Reuses the stored browser config when present.
+  /// mode -> run state machine. Reuses the stored browser config when present;
+  /// when the stored browser is no longer installed, or the stored profile dir
+  /// is gone, it falls back to the setup flow (re-configure) instead of failing
+  /// silently.
   void _startClaimFlow() {
     final cfg = _config.config.dailyClaim;
     if (cfg.browser != null && cfg.profileDir != null) {
-      // Already configured: head straight to the mode picker.
-      _dailyStep = _DailyStep.modeSelect;
-      setState(() {});
-      return;
+      if (_storedBrowserAvailable()) {
+        _dailyStep = _DailyStep.modeSelect;
+        setState(() {});
+        return;
+      }
+      // Stored browser disappeared or its profile dir is missing.
+      LogStore.info('Daily claim: stored browser config unavailable, '
+          're-running setup');
+      cfg.browser = null;
+      cfg.profileDir = null;
+      _config.save();
+      _dailyResult = ClaimCheckResult.unknown(
+          'stored browser config was no longer usable; pick a browser again');
     }
     if (_playwrightReady) {
       _pickBrowser();
@@ -798,6 +811,17 @@ class AppState extends State<AgroutApp> {
       _dailyStep = _DailyStep.installConfirm;
       setState(() {});
     }
+  }
+
+  /// True when the configured browser is still detected on the machine and its
+  /// dedicated automation profile dir exists.
+  bool _storedBrowserAvailable() {
+    final cfg = _config.config.dailyClaim;
+    if (cfg.browser == null || cfg.profileDir == null) return false;
+    final found = BrowserRegistry.detect()
+        .where((b) => b.id == cfg.browser && b.binaryPath != null)
+        .toList();
+    return found.isNotEmpty && Directory(cfg.profileDir!).existsSync();
   }
 
   bool get _playwrightReady => Directory('${configDir()}${Platform.pathSeparator}playwright')
@@ -888,8 +912,13 @@ class AppState extends State<AgroutApp> {
     }
     final exe = browser?.binaryPath;
     if (!cfg.isConfigured || exe == null) {
+      // Stored browser is not installed anymore: clear it so the next
+      // [a] re-runs the setup flow (re-configure) instead of failing.
+      cfg.browser = null;
+      cfg.profileDir = null;
+      _config.save();
       _dailyResult = ClaimCheckResult.unknown(
-          'browser ${cfg.browser} not found; pick again');
+          'browser ${browser?.id ?? '?'} is no longer installed; pick again');
       _dailyStep = _DailyStep.status;
       setState(() {});
       return;
@@ -900,6 +929,7 @@ class AppState extends State<AgroutApp> {
     setState(() {});
 
     _quotaBefore = 0;
+    _quotaAfter = null;
     try {
       final sub =
           await AgentRouterClient().fetchBillingSubscription(apiKey: profile.apiKey);
@@ -941,6 +971,13 @@ class AppState extends State<AgroutApp> {
           newApiUserId: attempt.newApiUserId,
         );
         _dailyResult = verified;
+        // Real "credit after" from /api/user/self using the fresh session.
+        final after = await detector.fetchQuotaWithSession(
+          apiKey: profile.apiKey,
+          sessionCookie: attempt.sessionCookie!,
+          newApiUserId: attempt.newApiUserId!,
+        );
+        if (after != null) _quotaAfter = after;
       } catch (_) {
         _dailyResult = ClaimCheckResult.confirmed('browser claim succeeded');
       }
@@ -1090,6 +1127,11 @@ class AppState extends State<AgroutApp> {
           const SizedBox(height: 1),
           Text('Billing hard limit before: \$${_quotaBefore.toStringAsFixed(2)}',
               style: const TextStyle(color: Color(0xFFD0D0D0))),
+        ],
+        if (a?.success == true && _quotaAfter != null) ...[
+          const SizedBox(height: 1),
+          Text('Account quota after: \$${_quotaAfter!.toStringAsFixed(2)}',
+              style: const TextStyle(color: Color(0xFF7FE0A0))),
         ],
         if (a?.sessionCookie != null) ...[
           const SizedBox(height: 1),

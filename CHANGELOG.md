@@ -28,8 +28,12 @@
     -> browser picker (only installed browsers) -> surface/background mode ->
     running progress -> done (with session cookie + billing-before readout).
     The `Claim your daily!` header badge appears beside the update badge
-    while the active key has no claim recorded for today. Browser automation
-    wiring lands in a follow-up.
+    while the active key has no claim recorded for today. If the stored
+    browser is later uninstalled (or its dedicated profile dir disappears),
+    the next `[a]` re-runs the setup flow instead of failing silently.
+    The done view shows the account quota after the claim, read from
+    `/api/user/self` with the freshly captured session cookie.
+    Browser automation wiring lands in a follow-up.
 
 ## v0.1.21 (2026-08-16)
 

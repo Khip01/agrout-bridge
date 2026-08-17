@@ -146,5 +146,34 @@ void main() {
       expect(r.isConfirmed, isTrue);
       expect(r.detail, contains('already marked'));
     });
+
+    test('fetchQuotaWithSession reads quota from /api/user/self', () async {
+      final config = DailyClaimConfig();
+      final d = DailyClaimDetector(
+          stub({
+            '/api/user/self': {
+              'data': {'quota': 100987074, 'used_quota': 91505424},
+            },
+          }),
+          config);
+      final usd = await d.fetchQuotaWithSession(
+        apiKey: 'sk-x',
+        sessionCookie: 'abc',
+        newApiUserId: '353187',
+      );
+      // 100987074 / 500000 = 201.974148
+      expect(usd, closeTo(201.974, 0.001));
+    });
+
+    test('fetchQuotaWithSession returns null on missing data', () async {
+      final config = DailyClaimConfig();
+      final d = DailyClaimDetector(stub({'/api/user/self': {'data': {}}}), config);
+      final usd = await d.fetchQuotaWithSession(
+        apiKey: 'sk-x',
+        sessionCookie: 'abc',
+        newApiUserId: '1',
+      );
+      expect(usd, isNull);
+    });
   });
 }
