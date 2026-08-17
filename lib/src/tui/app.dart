@@ -1405,19 +1405,22 @@ class AppState extends State<AgroutApp> {
   // ── Delete-profile confirmation ────────────────────────────────────
   Component _deleteConfirmPanel() {
     final target = _pendingDeleteProfile;
-    return Center(child: Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(border: BoxBorder.all(color: Color(0xFFFF8A8A))),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Text('Delete profile?', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF8A8A))),
-        const SizedBox(height: 1),
-        Text('Remove "${target?.name ?? ''}" and its API key?'),
-        const SizedBox(height: 1),
-        Row(children: [
-          _key(_footerHues['action']!, '[y] ', 'Yes   '),
-          _key(_footerHues['danger']!, '[n] ', 'No'),
+    return Center(child: SizedBox(
+      width: 80, // cap the dialog so long messages wrap, not the dialog
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(border: BoxBorder.all(color: Color(0xFFFF8A8A))),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('Delete profile?', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF8A8A))),
+          const SizedBox(height: 1),
+          Text('Remove "${target?.name ?? ''}" and its API key?'),
+          const SizedBox(height: 1),
+          Row(children: [
+            _key(_footerHues['action']!, '[y] ', 'Yes   '),
+            _key(_footerHues['danger']!, '[n] ', 'No'),
+          ]),
         ]),
-      ]),
+      ),
     ));
   }
 
@@ -1458,42 +1461,48 @@ class AppState extends State<AgroutApp> {
 
   Component _updateConfirmPanel() {
     final amber = const Color(0xFFFFD75E);
-    return Center(child: Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(border: BoxBorder.all(color: amber)),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Text('Update Available!', style: TextStyle(fontWeight: FontWeight.bold, color: amber)),
-        const SizedBox(height: 1),
-        Text('agrout-bridge v$bridgeVersion -> $_updateTag'),
-        const SizedBox(height: 1),
-        const Text('The TUI will close. Then run:'),
-        const SizedBox(height: 1),
-        const Text('  agrout-bridge update', style: TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 1),
-        Row(children: [
-          _key(_footerHues['action']!, '[c] ', 'copy command   '),
-          _key(_footerHues['update']!, '[y] ', 'close TUI   '),
-          _key(_footerHues['danger']!, '[n] ', 'back'),
+    return Center(child: SizedBox(
+      width: 80, // cap the dialog so long messages wrap, not the dialog
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(border: BoxBorder.all(color: amber)),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('Update Available!', style: TextStyle(fontWeight: FontWeight.bold, color: amber)),
+          const SizedBox(height: 1),
+          Text('agrout-bridge v$bridgeVersion -> $_updateTag'),
+          const SizedBox(height: 1),
+          const Text('The TUI will close. Then run:'),
+          const SizedBox(height: 1),
+          const Text('  agrout-bridge update', style: TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 1),
+          Row(children: [
+            _key(_footerHues['action']!, '[c] ', 'copy command   '),
+            _key(_footerHues['update']!, '[y] ', 'close TUI   '),
+            _key(_footerHues['danger']!, '[n] ', 'back'),
+          ]),
         ]),
-      ]),
+      ),
     ));
   }
 
   // ── Quit panel ────────────────────────────────────────────────────
   Component _quitPanel() {
-    return Center(child: Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(border: BoxBorder.all(color: Colors.yellow)),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Text('Quit agrout-bridge?', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.yellow)),
-        const SizedBox(height: 1),
-        Text('Proxy will stop at http://${_config.config.listenAddress}:${_config.config.serverPort}'),
-        const SizedBox(height: 1),
-        Row(children: [
-          _key(_footerHues['action']!, '[y] ', 'Yes   '),
-          _key(_footerHues['danger']!, '[n] ', 'No'),
+    return Center(child: SizedBox(
+      width: 80, // cap the dialog so long messages wrap, not the dialog
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(border: BoxBorder.all(color: Colors.yellow)),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('Quit agrout-bridge?', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.yellow)),
+          const SizedBox(height: 1),
+          Text('Proxy will stop at http://${_config.config.listenAddress}:${_config.config.serverPort}'),
+          const SizedBox(height: 1),
+          Row(children: [
+            _key(_footerHues['action']!, '[y] ', 'Yes   '),
+            _key(_footerHues['danger']!, '[n] ', 'No'),
+          ]),
         ]),
-      ]),
+      ),
     ));
   }
 
@@ -1645,13 +1654,15 @@ class AppState extends State<AgroutApp> {
 
     // Keymap: disabled (grey) until the corresponding condition holds;
     // enabled keys keep the bright-key/muted-label colour scheme.
-    return Center(child: Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(border: BoxBorder.all(color: Colors.cyan)),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Text('Port configuration', style: TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 1),
-        Text('Current: ${_config.config.serverPort}   Enter new port (empty = reset to ${AppConfig.defaultPort})'),
+    return Center(child: SizedBox(
+      width: 80, // cap the dialog so long messages wrap, not the dialog
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(border: BoxBorder.all(color: Colors.cyan)),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('Port configuration', style: TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 1),
+          Text('Current: ${_config.config.serverPort}   Enter new port (empty = reset to ${AppConfig.defaultPort})'),
         const SizedBox(height: 1),
         SizedBox(
           width: 24,
@@ -1687,6 +1698,7 @@ class AppState extends State<AgroutApp> {
           _key(_footerHues['danger']!, '[Esc] ', 'back'),
         ]),
       ]),
+      ),
     ));
   }
 
@@ -1840,22 +1852,24 @@ class AppState extends State<AgroutApp> {
 
   Component _dailyClaimPanel() {
     if (_dailyStage == _DailyStage.provider) {
-      return Center(child: Container(
-        padding: const EdgeInsets.all(3),
-        decoration: BoxDecoration(border: BoxBorder.all(color: const Color(0xFFFFD75E))),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Daily claim', style: TextStyle(color: Color(0xFFFFD75E), fontWeight: FontWeight.bold)),
-          const SizedBox(height: 1),
-          const Text('How did you sign up to AgentRouter?'),
-          const SizedBox(height: 1),
-          for (var i = 0; i < _dailyProviders.length; i++)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: Text(
-                '${i == _dailyProviderIndex ? '▸ ' : '  '}${_dailyProviderLabel(_dailyProviders[i])}',
-                style: i == _dailyProviderIndex
-                    ? const TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold)
-                    : const TextStyle(color: Colors.grey),
+      return Center(child: SizedBox(
+        width: 80, // cap the dialog so long messages wrap, not the dialog
+        child: Container(
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(border: BoxBorder.all(color: const Color(0xFFFFD75E))),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('Daily claim', style: TextStyle(color: Color(0xFFFFD75E), fontWeight: FontWeight.bold)),
+            const SizedBox(height: 1),
+            const Text('How did you sign up to AgentRouter?'),
+            const SizedBox(height: 1),
+            for (var i = 0; i < _dailyProviders.length; i++)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Text(
+                  '${i == _dailyProviderIndex ? '▸ ' : '  '}${_dailyProviderLabel(_dailyProviders[i])}',
+                  style: i == _dailyProviderIndex
+                      ? const TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold)
+                      : const TextStyle(color: Colors.grey),
               ),
             ),
           const SizedBox(height: 1),
@@ -1865,6 +1879,7 @@ class AppState extends State<AgroutApp> {
             _key(_footerHues['danger']!, '[Esc] ', 'cancel'),
           ]),
         ]),
+        ),
       ));
     }
     final url = _dailyUrl;

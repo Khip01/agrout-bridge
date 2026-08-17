@@ -32,6 +32,11 @@
 - **Daily-claim URL dialog has a fixed max width.** The long OAuth authorize
   URL used to stretch the dialog past half the screen. The dialog is now
   capped at 80 columns so the URL wraps in place and the box stays compact.
+- **Every modal dialog is capped at 80 columns.** Quit, delete-profile,
+  update-confirm, port configuration and the daily-claim provider picker
+  previously stretched to the full terminal width. They now share the same
+  max-width as the daily-claim URL dialog, so short dialogs no longer dwarf
+  the screen.
 - **Port-config panel keymap renders on one line.** The `[t] test`
   `[Enter] save` `[Esc] back` keymap was laid out as separate rows inside
   the panel (stacked vertically). It is now a single row with the shared
