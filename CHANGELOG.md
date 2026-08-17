@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased (v0.2.0)
+
+### Feat
+
+- **Daily-claim feature (foundation + TUI start).** AgentRouter awards a
+  quota bonus on the first daily sign-in. The bridge now ships the plumbing
+  for detecting and, later, automating that claim:
+  - `DailyClaimConfig` (per-key claim dates, expected amount + tolerance band,
+    browser + profile dir, detection mode) stored centrally in `config.json`.
+  - `BrowserRegistry` with per-platform data-dir detection for the popular
+    Chromium-family plus Firefox/Zen browsers; only installed browsers are
+    reported.
+  - `DailyClaimDetector`: authoritative signal via `/api/log/self` (`type=4`
+    check-in entry) when a session cookie exists, quota-delta window
+    (`expectedAmount +/- tolerance`) as cookie-less fallback.
+  - `PlaywrightBootstrap` lazy runtime: driver + bundled Node (~50-80 MB,
+    once) are only prepared when the user asks for automation; the browser
+    itself is the user's own install reused via `executablePath`, so no
+    Playwright browser bundle is downloaded.
+  - `DailyClaimBrowser`: drives the installed browser with a dedicated bridge
+    profile (`~/.config/agrout-bridge/browser`), clicking "Continue with
+    GitHub" and capturing the session cookie after the OAuth round trip.
+  - TUI: `[Shift+Q]` opens the daily-claim dialog (status check via the
+    detector, `[c]` copy login URL, `[Shift+Y]` mark done, `[Esc]` back).
+    Browser automation wiring lands in a follow-up.
+
 ## v0.1.21 (2026-08-16)
 
 ### Fix

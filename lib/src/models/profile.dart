@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../services/daily_claim.dart';
+
 /// A single AgentRouter identity held by the bridge.
 ///
 /// The credential is the chat API key (`sk-...` from the agentrouter.org
@@ -90,6 +92,9 @@ class AppConfig {
   String? activeProfileId;
   String proxyAuthToken;
 
+  /// Daily-claim feature state (expected reward, tolerance, browser config).
+  DailyClaimConfig dailyClaim;
+
   /// Strip oversized system-prompt context blocks before forwarding.
   ///
   /// Defaults to `false`. Empirical testing against agentrouter.org's input
@@ -107,7 +112,8 @@ class AppConfig {
     this.activeProfileId,
     this.proxyAuthToken = '',
     this.trimSystemPrompt = false,
-  });
+    DailyClaimConfig? dailyClaim,
+  }) : dailyClaim = dailyClaim ?? DailyClaimConfig();
 
   Map<String, dynamic> toJson() => {
         'serverPort': serverPort,
@@ -115,6 +121,7 @@ class AppConfig {
         if (activeProfileId != null) 'activeProfileId': activeProfileId,
         'proxyAuthToken': proxyAuthToken,
         'trimSystemPrompt': trimSystemPrompt,
+        'dailyClaim': dailyClaim.toJson(),
       };
 
   factory AppConfig.fromJson(Map<String, dynamic> json) => AppConfig(
@@ -123,6 +130,10 @@ class AppConfig {
         activeProfileId: json['activeProfileId'] as String?,
         proxyAuthToken: json['proxyAuthToken'] as String? ?? '',
         trimSystemPrompt: json['trimSystemPrompt'] as bool? ?? false,
+        dailyClaim: json['dailyClaim'] is Map
+            ? DailyClaimConfig.fromJson(
+                (json['dailyClaim'] as Map).cast<String, dynamic>())
+            : DailyClaimConfig(),
       );
 }
 

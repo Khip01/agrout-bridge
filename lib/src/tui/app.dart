@@ -6,6 +6,8 @@ import 'package:nocterm/nocterm.dart' hide LogEntry, Clipboard;
 import '../models/profile.dart';
 import '../models/version.dart';
 import '../services/api_client.dart';
+import '../services/daily_claim_detector.dart';
+import '../services/daily_claim_tui.dart';
 import '../services/login.dart';
 import '../services/log_store.dart';
 import '../services/updater.dart';
@@ -39,7 +41,7 @@ class AgroutApp extends StatefulComponent {
   State<AgroutApp> createState() => AppState();
 }
 
-enum _Panel { main, help, quit, login, portConfig, deleteConfirm, updateConfirm }
+enum _Panel { main, help, quit, login, portConfig, deleteConfirm, updateConfirm, daily }
 
 enum _InfoPage { profile, usage, models, proxy }
 
@@ -107,6 +109,13 @@ class AppState extends State<AgroutApp> {
 
   /// Latest stable tag from GitHub, when newer than [bridgeVersion].
   String? _updateTag;
+
+  /// Daily-claim dialog state: the most recent [ClaimCheckResult] plus whether
+  /// the check is still in flight, and a marker holding a claim that needs
+  /// manual confirmation (`[Shift+Y] mark` vs `[Esc] back`).
+  ClaimCheckResult? _dailyResult;
+  bool _dailyChecking = false;
+  bool _dailyPendingConfirm = false;
 
   static const _pageNames = ['Profile', 'Usage & Cost', 'Models', 'Proxy Config'];
 
@@ -264,6 +273,39 @@ class AppState extends State<AgroutApp> {
       }
       return false;
     }
+    if (_panel == _Panel.daily) {
+      if (_dailyPendingConfirm) {
+        if (e.logicalKey == LogicalKey.keyY && e.isShiftPressed) {
+          _confirmMarkClaimed();
+          return true;
+        }
+        if (e.logicalKey == LogicalKey.keyN || e.logicalKey == LogicalKey.escape) {
+          _dailyPendingConfirm = false;
+          setState(() {});
+          return true;
+        }
+        return false;
+      }
+      if (e.logicalKey == LogicalKey.keyC && !e.isControlPressed) {
+        unawaited(Clipboard.copy('https://agentrouter.org/login'));
+        _setStatus('Copied AgentRouter login URL to clipboard', duration: 3);
+        return true;
+      }
+      if (e.logicalKey == LogicalKey.keyY && e.isShiftPressed) {
+        _dailyPendingConfirm = true;
+        setState(() {});
+        return true;
+      }
+      if (e.logicalKey == LogicalKey.keyR) {
+        unawaited(_checkDailyClaim());
+        return true;
+      }
+      if (e.logicalKey == LogicalKey.escape || e.logicalKey == LogicalKey.keyQ) {
+        _closeDailyClaim();
+        return true;
+      }
+      return false;
+    }
     if (_panel == _Panel.login) {
       // Login panel: [c] copy URL, [Esc] close (and stop server).
       if (e.logicalKey == LogicalKey.keyC && !e.isControlPressed) {
@@ -320,6 +362,10 @@ class AppState extends State<AgroutApp> {
         return true;
       }
       _setStatus('No update available', duration: 3);
+      return true;
+    }
+    if (e.logicalKey == LogicalKey.keyQ && e.isShiftPressed && !e.isControlPressed) {
+      _openDailyClaim();
       return true;
     }
     if (e.logicalKey == LogicalKey.keyH) { _panel = _Panel.help; setState(() {}); return true; }
@@ -572,6 +618,134 @@ class AppState extends State<AgroutApp> {
     }
   }
 
+  // ── Daily claim ────────────────────────────────────────────────────
+  bool get _dailyEnabled => _config.config.dailyClaim.enabled;
+
+  /// Open the daily-claim dialog and run a fresh status check. Shown on
+  /// [Shift+Q] from the main page.
+  void _openDailyClaim() {
+    _panel = _Panel.daily;
+    _dailyPendingConfirm = false;
+    setState(() {});
+    unawaited(_checkDailyClaim());
+  }
+
+  void _closeDailyClaim() {
+    _panel = _Panel.main;
+    _startPageRefresh();
+    setState(() {});
+  }
+
+  Future<void> _checkDailyClaim() async {
+    final profile = _activeProfile;
+    if (profile == null || profile.apiKey.isEmpty) {
+      _dailyResult = ClaimCheckResult.unknown('no active API key');
+      if (mounted) setState(() {});
+      return;
+    }
+    if (_dailyChecking) return;
+    _dailyChecking = true;
+    _dailyResult = null;
+    if (mounted) setState(() {});
+    try {
+      final config = _config.config.dailyClaim;
+      final detector = DailyClaimDetector(
+          dailyClaimFetch(BridgedDailyClaimClient(AgentRouterClient())),
+          config);
+      final result = await detector.check(
+        credentialId: profile.id,
+        apiKey: profile.apiKey,
+      );
+      if (mounted) {
+        _dailyResult = result;
+        // If a session cookie is stored, upgrade the label automatically.
+        if (result.isConfirmed && !config.claimedToday(profile.id)) {
+          config.markClaimed(profile.id);
+          LogStore.info('Daily claim: confirmed (${result.detail})');
+        }
+      }
+    } catch (e) {
+      _dailyResult = ClaimCheckResult.unknown('check failed: $e');
+    } finally {
+      _dailyChecking = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _confirmMarkClaimed() {
+    final profile = _activeProfile;
+    _dailyPendingConfirm = false;
+    if (profile == null) {
+      _closeDailyClaim();
+      return;
+    }
+    _config.config.dailyClaim.markClaimed(profile.id);
+    _config.save();
+    _dailyResult = ClaimCheckResult.confirmed('marked manually');
+    LogStore.info('Daily claim: marked done manually for ${profile.name}');
+    _setStatus('Daily claim marked done for today', duration: 3);
+    setState(() {});
+  }
+
+  Profile? get _activeProfile =>
+      _config.config.activeProfileId == null
+          ? null
+          : _profiles.byId(_config.config.activeProfileId!);
+
+  Component _dailyClaimPanel() {
+    final blue = const Color(0xFF64B5F6);
+    final cfg = _config.config.dailyClaim;
+    final resolved = _dailyResult;
+    final profile = _activeProfile;
+
+    String statusText;
+    Color statusColor;
+    if (_dailyChecking) {
+      statusText = 'Checking AgentRouter...';
+      statusColor = const Color(0xFFD0D0D0);
+    } else if (_dailyPendingConfirm) {
+      statusText = 'Had a claim today? [Shift+Y] yes  [N] no';
+      statusColor = const Color(0xFFFFD75E);
+    } else if (resolved == null) {
+      statusText = 'No check yet';
+      statusColor = const Color(0xFFD0D0D0);
+    } else if (resolved.isConfirmed) {
+      statusText = 'Claimed today: ${resolved.detail}';
+      statusColor = const Color(0xFF7FE0A0);
+    } else if (resolved.isNotClaimed) {
+      statusText = 'Not claimed today yet: ${resolved.detail}';
+      statusColor = blue;
+    } else {
+      statusText = 'Unknown: ${resolved.detail}';
+      statusColor = const Color(0xFFFF8A8A);
+    }
+
+    return Center(child: Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(border: BoxBorder.all(color: blue)),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('Claim your daily!', style: TextStyle(fontWeight: FontWeight.bold, color: blue)),
+        const SizedBox(height: 1),
+        Text('Window: \$${cfg.expectedAmount.toStringAsFixed(cfg.expectedAmount % 1 == 0 ? 0 : 2)} '
+            '+/- \$${cfg.tolerance.toStringAsFixed(1)} '
+            '(mode: ${cfg.mode}, browser: ${cfg.browser ?? 'manual'})'),
+        const SizedBox(height: 1),
+        Text('Key: ${profile?.name ?? 'none'}'),
+        const SizedBox(height: 1),
+        Text(statusText, style: TextStyle(color: statusColor)),
+        if (_dailyPendingConfirm) ...[
+          const SizedBox(height: 1),
+          const Text('Mark done only after you actually claimed in the browser.',
+              style: TextStyle(color: Color(0xFFD0D0D0))),
+        ],
+        const SizedBox(height: 1),
+        Text('[c] copy agentrouter login URL   [r] re-check   '
+            '[Shift+Y] mark done   [Esc] close',
+            style: const TextStyle(color: Color(0xFFD0D0D0))),
+      ]),
+    ));
+  }
+
   void _doRefresh() async {
     if (_loadingModels) return;
     _loadingModels = true;
@@ -692,6 +866,7 @@ class AppState extends State<AgroutApp> {
     if (_panel == _Panel.quit) return _quitPanel();
     if (_panel == _Panel.deleteConfirm) return _deleteConfirmPanel();
     if (_panel == _Panel.updateConfirm) return _updateConfirmPanel();
+    if (_panel == _Panel.daily) return _dailyClaimPanel();
     if (_panel == _Panel.login) return _loginPanel();
     if (_panel == _Panel.portConfig) return _portConfigPanel();
 
@@ -1066,6 +1241,8 @@ class AppState extends State<AgroutApp> {
         else
           Text('[l] ', style: cfgStyle),
         Text('login  ', style: _hasNoKey ? actionStyle : cfgStyle),
+        if (_dailyEnabled) Text('[Shift+Q] ', style: infoStyle) else const Text(''),
+        if (_dailyEnabled) Text('daily  ', style: infoStyle) else const Text(''),
         if (_updateTag != null)
           Text('[Shift+U] ', style: updateStyle)
         else
@@ -1283,6 +1460,7 @@ class AppState extends State<AgroutApp> {
     add('Other:', Colors.cyan);
     add('  [p]  Port configuration panel');
     add('  [l]  Open login URL (paste API key)');
+    if (_dailyEnabled) add('  [Shift+Q]  Open daily-claim dialog');
     if (_updateTag != null) add('  [Shift+U]  Close bridge and suggest update to $_updateTag');
     add('  [h]  Help');
     add('  [q]  Quit');

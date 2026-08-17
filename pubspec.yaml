@@ -10,6 +10,7 @@ dependencies:
   nocterm: ^0.8.0
   http: ^1.6.0
   crypto: ^3.0.7
+  playwright_dart: ^3.12.0
 
 dev_dependencies:
   test: ^1.25.0
