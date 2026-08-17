@@ -47,7 +47,7 @@ class AgroutApp extends StatefulComponent {
 enum _Panel { main, help, quit, login, portConfig, deleteConfirm, updateConfirm, daily }
 
 /// Sub-steps of the daily-claim dialog.
-enum _DailyStep { status, installConfirm, browserSelect, modeSelect, running, done }
+enum _DailyStep { status, installConfirm, browserSelect, profileSelect, modeSelect, running, done }
 
 enum _InfoPage { profile, usage, models, proxy }
 
@@ -127,6 +127,8 @@ class AppState extends State<AgroutApp> {
   _DailyStep _dailyStep = _DailyStep.status;
   List<DetectedBrowser> _detectedBrowsers = [];
   int _browserIndex = 0;
+  List<DetectedProfile> _detectedProfiles = [];
+  int _profileIndex = 0;
   bool _claimRunning = false;
   bool _claimSurface = false;
   String _claimProgress = '';
@@ -355,6 +357,27 @@ class AppState extends State<AgroutApp> {
           }
           if (e.logicalKey == LogicalKey.escape) {
             _dailyStep = _DailyStep.status;
+            setState(() {});
+            return true;
+          }
+          return false;
+        case _DailyStep.profileSelect:
+          if (e.logicalKey == LogicalKey.arrowUp) {
+            if (_profileIndex > 0) _profileIndex--;
+            setState(() {});
+            return true;
+          }
+          if (e.logicalKey == LogicalKey.arrowDown) {
+            if (_profileIndex < _detectedProfiles.length - 1) _profileIndex++;
+            setState(() {});
+            return true;
+          }
+          if (e.logicalKey == LogicalKey.enter) {
+            _acceptProfile();
+            return true;
+          }
+          if (e.logicalKey == LogicalKey.escape) {
+            _dailyStep = _DailyStep.browserSelect;
             setState(() {});
             return true;
           }
@@ -869,8 +892,8 @@ class AppState extends State<AgroutApp> {
     }());
   }
 
-  /// Enter on the browser picker: persist the choice + a dedicated profile
-  /// dir, then ask for surface/background mode.
+  /// Enter on the browser picker: remember the browser, then list its real
+  /// profiles so the user picks the one already signed in to GitHub.
   void _acceptBrowser() {
     final b = _browserIndex < _detectedBrowsers.length
         ? _detectedBrowsers[_browserIndex]
@@ -878,11 +901,78 @@ class AppState extends State<AgroutApp> {
     if (b == null) return;
     final cfg = _config.config.dailyClaim;
     cfg.browser = b.id;
-    cfg.profileDir = '${configDir()}${Platform.pathSeparator}browser';
     _config.save();
     LogStore.info('Daily claim: using browser ${b.id} (${b.dataDir})');
-    _dailyStep = _DailyStep.modeSelect;
+
+    _detectedProfiles = b.dataDir == null
+        ? const []
+        : BrowserRegistry.profiles(b.dataDir!);
+    if (_detectedProfiles.isEmpty) {
+      // No readable profiles: fall straight to mode select (manual profile
+      // dir will be created on first run).
+      cfg.profileDir = '${configDir()}${Platform.pathSeparator}browser';
+      _config.save();
+      _dailyStep = _DailyStep.modeSelect;
+      setState(() {});
+      return;
+    }
+    // Default select the stored profile id when present.
+    _profileIndex = _detectedProfiles
+        .indexWhere((p) => p.dirName == cfg.profileId)
+        .clamp(0, _detectedProfiles.length - 1);
+    _dailyStep = _DailyStep.profileSelect;
     setState(() {});
+  }
+
+  /// Enter on the profile picker: copy the selected real profile into the
+  /// dedicated automation dir (so GitHub stays signed in), then ask for the
+  /// surface/background mode.
+  void _acceptProfile() {
+    final b = _browserIndex < _detectedBrowsers.length
+        ? _detectedBrowsers[_browserIndex]
+        : null;
+    final pr = _profileIndex < _detectedProfiles.length
+        ? _detectedProfiles[_profileIndex]
+        : null;
+    if (b == null || pr == null || b.dataDir == null) return;
+    final cfg = _config.config.dailyClaim;
+    final target = Directory(
+        '${configDir()}${Platform.pathSeparator}browser');
+    final src = Directory(
+        '${b.dataDir}${Platform.pathSeparator}${pr.dirName}');
+    if (!src.existsSync()) {
+      _dailyResult = ClaimCheckResult.unknown(
+          'profile ${pr.dirName} not found in ${b.dataDir}; pick another');
+      _dailyStep = _DailyStep.status;
+      setState(() {});
+      return;
+    }
+    _dailyStep = _DailyStep.running;
+    _claimRunning = true;
+    _claimProgress = 'Copying profile "${pr.displayName}" (one-time)...';
+    setState(() {});
+
+    unawaited(() async {
+      try {
+        final n = copyDirectory(src, target);
+        cfg.profileDir = target.path;
+        cfg.profileId = pr.dirName;
+        _config.save();
+        LogStore.info(
+            'Daily claim: copied profile ${pr.dirName} ($n files) to ${target.path}');
+        _claimRunning = false;
+        if (mounted) {
+          _dailyStep = _DailyStep.modeSelect;
+          setState(() {});
+        }
+      } catch (e) {
+        _claimRunning = false;
+        _dailyStep = _DailyStep.done;
+        _lastAttempt = DailyClaimAttempt(success: false, message: '$e');
+        _dailyResult = ClaimCheckResult.unknown('profile copy failed: $e');
+        if (mounted) setState(() {});
+      }
+    }());
   }
 
   void _setClaimProgress(String m) {
@@ -1117,6 +1207,34 @@ class AppState extends State<AgroutApp> {
       ]);
     }
 
+    Component buildProfileSelect() {
+      final rows = <Component>[];
+      for (var i = 0; i < _detectedProfiles.length; i++) {
+        final pr = _detectedProfiles[i];
+        rows.add(Text(
+          '${i == _profileIndex ? '>' : ' '} ${pr.displayName}'
+          '${i == _profileIndex ? '   (selected)' : ''}',
+          style: i == _profileIndex
+              ? const TextStyle(color: Color(0xFF7FE0A0))
+              : null,
+        ));
+      }
+      return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Which profile is signed in to GitHub for AgentRouter?',
+            style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64B5F6))),
+        const SizedBox(height: 1),
+        ...rows,
+        const SizedBox(height: 1),
+        const Text('The bridge copies that profile once into its own storage, '
+            'so it can claim automatically without asking you to log in again.'),
+        const SizedBox(height: 1),
+        const SizedBox(height: 1),
+        _keyHint('[up/down]', 'choose'),
+        _keyHint('[Enter]', 'confirm'),
+        _keyHint('[Esc]', 'back (pick another browser)'),
+      ]);
+    }
+
     Component buildModeSelect() {
       return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Text('Watch the claim or run it quietly?',
@@ -1186,6 +1304,7 @@ class AppState extends State<AgroutApp> {
           _DailyStep.status => buildStatus(),
           _DailyStep.installConfirm => buildInstall(),
           _DailyStep.browserSelect => buildBrowserSelect(),
+          _DailyStep.profileSelect => buildProfileSelect(),
           _DailyStep.modeSelect => buildModeSelect(),
           _DailyStep.running => buildRunning(),
           _DailyStep.done => buildDone(),

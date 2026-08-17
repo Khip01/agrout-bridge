@@ -1,4 +1,26 @@
+import 'dart:convert';
 import 'dart:io';
+
+/// Recursively copy [src] into [dst]. Returns the number of files copied.
+/// Used to seed the dedicated automation profile from a real browser profile
+/// (so GitHub stays signed in). No shell, plain Dart.
+int copyDirectory(Directory src, Directory dst) {
+  if (dst.existsSync()) dst.deleteSync(recursive: true);
+  dst.createSync(recursive: true);
+  var count = 0;
+  final base = src.path.endsWith(Platform.pathSeparator)
+      ? src.path
+      : '${src.path}${Platform.pathSeparator}';
+  for (final e in src.listSync(recursive: true)) {
+    if (e is! File) continue;
+    final rel = e.path.startsWith(base) ? e.path.substring(base.length) : e.path;
+    final target = File('${dst.path}${Platform.pathSeparator}$rel');
+    target.parent.createSync(recursive: true);
+    e.copySync(target.path);
+    count++;
+  }
+  return count;
+}
 
 /// Daily-claim feature configuration, stored centrally in `config.json` so
 /// every parameter lives in one place instead of being hardcoded across the
@@ -36,6 +58,11 @@ class DailyClaimConfig {
   /// daily browser).
   String? profileDir;
 
+  /// Source profile folder inside the browser's data dir that was copied to
+  /// [profileDir] (e.g. `Default`, `Profile 1`). Kept so the UI can show and
+  /// re-pick the real user profile.
+  String? profileId;
+
   /// Timestamp (YYYY-MM-DD) of the last confirmed claim per API key id.
   /// Keyed by credential id so each key tracks its own daily state.
   final Map<String, String> lastClaimDate;
@@ -47,6 +74,7 @@ class DailyClaimConfig {
     this.mode = 'quota',
     this.browser,
     this.profileDir,
+    this.profileId,
     Map<String, String>? lastClaimDate,
   }) : lastClaimDate = lastClaimDate ?? {};
 
@@ -82,6 +110,7 @@ class DailyClaimConfig {
         'mode': mode,
         if (browser != null) 'browser': browser,
         if (profileDir != null) 'profileDir': profileDir,
+        if (profileId != null) 'profileId': profileId,
         'lastClaimDate': lastClaimDate,
       };
 
@@ -96,9 +125,24 @@ class DailyClaimConfig {
       mode: json['mode'] as String? ?? 'quota',
       browser: json['browser'] as String?,
       profileDir: json['profileDir'] as String?,
+      profileId: json['profileId'] as String?,
       lastClaimDate: last,
     );
   }
+}
+
+/// A browser profile found inside a detected browser's data dir.
+class DetectedProfile {
+  /// Folder name inside the data dir (`Default`, `Profile 1`, ...).
+  final String dirName;
+
+  /// Human name from the browser's `Local State` when available.
+  final String displayName;
+
+  const DetectedProfile(this.dirName, this.displayName);
+
+  @override
+  String toString() => displayName.isEmpty ? dirName : displayName;
 }
 
 /// A browser detected on the host, ready to be offered in the setup dialog.
@@ -255,5 +299,42 @@ class BrowserRegistry {
       return Platform.environment['USERPROFILE'] ?? r'C:\Users\Default';
     }
     return Platform.environment['HOME'] ?? '/root';
+  }
+
+  /// List the profiles inside a detected browser's data dir. Profile folders
+  /// are `Default` (first) plus numbered `Profile N`. Names come from the
+  /// browser's `Local State` JSON when readable; otherwise fall back to the
+  /// folder name.
+  static List<DetectedProfile> profiles(String dataDir) {
+    final dir = Directory(dataDir);
+    if (!dir.existsSync()) return const [];
+
+    final names = <String, String>{}; // folder -> display name
+    final localState = File('${dataDir}${Platform.pathSeparator}Local State');
+    if (localState.existsSync()) {
+      try {
+        final data = jsonDecode(localState.readAsStringSync());
+        final cache = (data as Map?)?['profile']?['info_cache'];
+        if (cache is Map) {
+          cache.forEach((folder, v) {
+            if (v is Map && v['name'] is String) {
+              names[folder.toString()] = v['name'] as String;
+            }
+          });
+        }
+      } catch (_) {}
+    }
+
+    final result = <DetectedProfile>[];
+    final dirs = dir.listSync().whereType<Directory>().toList()
+      ..sort((a, b) => a.path.compareTo(b.path));
+    for (final d in dirs) {
+      final folder = d.path.split(Platform.pathSeparator).last;
+      if (folder == 'Cache' || folder == 'GPUCache' || folder == 'Crashpad') continue;
+      if (folder.startsWith('Default') || RegExp(r'^Profile \d+$').hasMatch(folder)) {
+        result.add(DetectedProfile(folder, names[folder] ?? folder));
+      }
+    }
+    return result;
   }
 }
