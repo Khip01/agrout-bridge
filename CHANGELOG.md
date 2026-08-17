@@ -37,6 +37,15 @@
   previously stretched to the full terminal width. They now share the same
   max-width as the daily-claim URL dialog, so short dialogs no longer dwarf
   the screen.
+- **`[Shift+C]` / `[Shift+O]` clear the log reliably.** The log-specific
+  keys are now handled before the main keymap, so with the log open
+  `Shift+C` no longer opens the daily-claim dialog and `Shift+O` no longer
+  copies the OpenAI endpoint; both clear the log as labelled.
+- **Dialog keymaps moved to the footer.** Dialogs no longer render their own
+  keymap (it was duplicated and verbose). While a dialog is open, its keys
+  appear once, in the footer, centered on the line, styled with the same
+  bright-key/muted-label palette. The log header labels are spelled out:
+  `[f] fullscreen`, `[Shift+C] clear all`, `[Shift+O] clear old only`.
 - **Port-config panel keymap renders on one line.** The `[t] test`
   `[Enter] save` `[Esc] back` keymap was laid out as separate rows inside
   the panel (stacked vertically). It is now a single row with the shared

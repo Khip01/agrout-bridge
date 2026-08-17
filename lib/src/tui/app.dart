@@ -368,6 +368,44 @@ class AppState extends State<AgroutApp> {
       }
       return false;
     }
+    if (_showLog) {
+      // Log-specific keys take priority over the main panel keymap so that
+      // Shift+C / Shift+O are not swallowed by the daily-claim / endpoint keys.
+      // Pending clear confirmation takes priority over every other log key.
+      if (_confirmClear != _ClearScope.none) {
+        if (e.logicalKey == LogicalKey.keyY || e.logicalKey == LogicalKey.enter) {
+          _doConfirmClear();
+          return true;
+        }
+        if (e.logicalKey == LogicalKey.keyN || e.logicalKey == LogicalKey.escape) {
+          _cancelConfirmClear();
+          return true;
+        }
+        return false;
+      }
+      if (e.logicalKey == LogicalKey.keyF) { _logFullscreen = !_logFullscreen; setState(() {}); return true; }
+      if (e.logicalKey == LogicalKey.keyC && e.isShiftPressed) {
+        if (LogStore.entries.isEmpty) {
+          _setStatus('Log is already empty', duration: 3);
+          return true;
+        }
+        _confirmClear = _ClearScope.all;
+        _setStatus('Clear ALL ${LogStore.entries.length} log entries? [Y]es [N]o', duration: 0);
+        setState(() {});
+        return true;
+      }
+      if (e.logicalKey == LogicalKey.keyO && e.isShiftPressed) {
+        final n = LogStore.countBeforeToday();
+        if (n == 0) {
+          _setStatus('No entries older than today', duration: 3);
+          return true;
+        }
+        _confirmClear = _ClearScope.beforeToday;
+        _setStatus('Clear $n entries before today? [Y]es [N]o', duration: 0);
+        setState(() {});
+        return true;
+      }
+    }
     // Main panel keymap.
     if (e.logicalKey == LogicalKey.keyC && e.isControlPressed) {
       _setStatus('Use [q] to quit', duration: 3);
@@ -404,42 +442,6 @@ class AppState extends State<AgroutApp> {
     }
     if (e.logicalKey == LogicalKey.keyH) { _panel = _Panel.help; setState(() {}); return true; }
     if (e.logicalKey == LogicalKey.keyQ) { _panel = _Panel.quit; setState(() {}); return true; }
-    if (_showLog) {
-      // Pending clear confirmation takes priority over every other log key.
-      if (_confirmClear != _ClearScope.none) {
-        if (e.logicalKey == LogicalKey.keyY || e.logicalKey == LogicalKey.enter) {
-          _doConfirmClear();
-          return true;
-        }
-        if (e.logicalKey == LogicalKey.keyN || e.logicalKey == LogicalKey.escape) {
-          _cancelConfirmClear();
-          return true;
-        }
-        return false;
-      }
-      if (e.logicalKey == LogicalKey.keyF) { _logFullscreen = !_logFullscreen; setState(() {}); return true; }
-      if (e.logicalKey == LogicalKey.keyC && e.isShiftPressed) {
-        if (LogStore.entries.isEmpty) {
-          _setStatus('Log is already empty', duration: 3);
-          return true;
-        }
-        _confirmClear = _ClearScope.all;
-        _setStatus('Clear ALL ${LogStore.entries.length} log entries? [Y]es [N]o', duration: 0);
-        setState(() {});
-        return true;
-      }
-      if (e.logicalKey == LogicalKey.keyO && e.isShiftPressed) {
-        final n = LogStore.countBeforeToday();
-        if (n == 0) {
-          _setStatus('No entries older than today', duration: 3);
-          return true;
-        }
-        _confirmClear = _ClearScope.beforeToday;
-        _setStatus('Clear $n entries before today? [Y]es [N]o', duration: 0);
-        setState(() {});
-        return true;
-      }
-    }
     if (_infoPage == _InfoPage.models && e.logicalKey == LogicalKey.enter) {
       _copySelectedModel();
       return true;
@@ -1134,25 +1136,16 @@ class AppState extends State<AgroutApp> {
   };
 
   Component _buildFooter() {
-    final base = TextStyle(color: Colors.grey);
     // Daily entry: fully bold while the claim is still pending (status bar
     // indicator), back to the usual bright-key/muted-label when done.
     final dailyBold = !_dailyDoneToday;
     if (_panel != _Panel.main) {
-      final hint = _panel == _Panel.login
-          ? '[c] copy URL | [Esc] close'
-          : _panel == _Panel.dailyClaim
-              ? (_dailyStage == _DailyStage.provider
-                  ? '[up/down] move   [Enter] select   [Esc] cancel'
-                  : '[c] copy URL   [o] open in browser   [Esc] back   [Enter] done')
-              : _panel == _Panel.deleteConfirm
-                  ? '[y] confirm  [n] cancel'
-                  : _panel == _Panel.updateConfirm
-                      ? '[c] copy cmd   [y] close   [n] back'
-                      : '[Esc] back';
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 1),
-        child: Text(' $hint', style: base),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: _dialogFooterHint(),
+        ),
       );
     }
     final nav = _footerHues['nav']!;
@@ -1196,6 +1189,64 @@ class AppState extends State<AgroutApp> {
           style: TextStyle(
               color: labelColor, fontWeight: boldAll ? FontWeight.bold : null)),
     ]);
+  }
+
+  /// Keymap shown in the footer while a dialog is open. Dialogs themselves do
+  /// not render their own keymap (it was duplicated and verbose); the keys
+  /// live here, styled with the same bright-key/muted-label palette.
+  List<Component> _dialogFooterHint() {
+    final action = _footerHues['action']!;
+    final danger = _footerHues['danger']!;
+    final page = _footerHues['page']!;
+    final update = _footerHues['update']!;
+    final info = _footerHues['info']!;
+    switch (_panel) {
+      case _Panel.login:
+        return [
+          _key(action, '[c] ', 'copy URL   '),
+          _key(danger, '[Esc] ', 'close'),
+        ];
+      case _Panel.dailyClaim:
+        if (_dailyStage == _DailyStage.provider) {
+          return [
+            _key(page, '[up/down] ', 'move   '),
+            _key(action, '[Enter] ', 'select   '),
+            _key(danger, '[Esc] ', 'cancel'),
+          ];
+        }
+        return [
+          _key(action, '[c] ', 'copy URL   '),
+          _key(action, '[o] ', 'open in browser   '),
+          _key(danger, '[Esc] ', 'back   '),
+          _key(action, '[Enter] ', 'done'),
+        ];
+      case _Panel.deleteConfirm:
+        return [
+          _key(action, '[y] ', 'confirm   '),
+          _key(danger, '[n] ', 'cancel'),
+        ];
+      case _Panel.updateConfirm:
+        return [
+          _key(action, '[c] ', 'copy cmd   '),
+          _key(update, '[y] ', 'close   '),
+          _key(danger, '[n] ', 'back'),
+        ];
+      case _Panel.quit:
+        return [
+          _key(action, '[y] ', 'Yes   '),
+          _key(danger, '[n] ', 'No'),
+        ];
+      case _Panel.portConfig:
+        return [
+          _key(info, '[t] ', 'test  ', disabled: !_portTestable),
+          _key(info, '[Enter] ', 'save  ', disabled: !_portSavable),
+          _key(danger, '[Esc] ', 'back'),
+        ];
+      case _Panel.help:
+        return [_key(danger, '[Esc] ', 'back')];
+      case _Panel.main:
+        return [];
+    }
   }
 
   /// Keys that only work on the current page, highlighted so the user sees
@@ -1273,9 +1324,9 @@ class AppState extends State<AgroutApp> {
       Row(children: [
         Text(fullscreen ? ' LOG (fullscreen)' : ' LOG', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF9C8FFF))),
         const Spacer(),
-        if (!fullscreen) _key(_footerHues['ctrl']!, '[f]', 'ull  '),
-        _key(_footerHues['ctrl']!, '[Shift+C]', 'lear  '),
-        _key(_footerHues['ctrl']!, '[Shift+O]', 'ld'),
+        if (!fullscreen) _key(_footerHues['ctrl']!, '[f]', ' fullscreen  '),
+        _key(_footerHues['ctrl']!, '[Shift+C]', ' clear all  '),
+        _key(_footerHues['ctrl']!, '[Shift+O]', ' clear old only'),
       ]),
       Container(height: 1, color: Colors.grey),
       if (_confirmClear != _ClearScope.none)
@@ -1414,11 +1465,6 @@ class AppState extends State<AgroutApp> {
           const Text('Delete profile?', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFFF8A8A))),
           const SizedBox(height: 1),
           Text('Remove "${target?.name ?? ''}" and its API key?'),
-          const SizedBox(height: 1),
-          Row(children: [
-            _key(_footerHues['action']!, '[y] ', 'Yes   '),
-            _key(_footerHues['danger']!, '[n] ', 'No'),
-          ]),
         ]),
       ),
     ));
@@ -1474,12 +1520,6 @@ class AppState extends State<AgroutApp> {
           const Text('The TUI will close. Then run:'),
           const SizedBox(height: 1),
           const Text('  agrout-bridge update', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 1),
-          Row(children: [
-            _key(_footerHues['action']!, '[c] ', 'copy command   '),
-            _key(_footerHues['update']!, '[y] ', 'close TUI   '),
-            _key(_footerHues['danger']!, '[n] ', 'back'),
-          ]),
         ]),
       ),
     ));
@@ -1496,11 +1536,6 @@ class AppState extends State<AgroutApp> {
           const Text('Quit agrout-bridge?', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.yellow)),
           const SizedBox(height: 1),
           Text('Proxy will stop at http://${_config.config.listenAddress}:${_config.config.serverPort}'),
-          const SizedBox(height: 1),
-          Row(children: [
-            _key(_footerHues['action']!, '[y] ', 'Yes   '),
-            _key(_footerHues['danger']!, '[n] ', 'No'),
-          ]),
         ]),
       ),
     ));
@@ -1652,8 +1687,6 @@ class AppState extends State<AgroutApp> {
       statusColor = Colors.grey;
     }
 
-    // Keymap: disabled (grey) until the corresponding condition holds;
-    // enabled keys keep the bright-key/muted-label colour scheme.
     return Center(child: SizedBox(
       width: 80, // cap the dialog so long messages wrap, not the dialog
       child: Container(
@@ -1687,16 +1720,6 @@ class AppState extends State<AgroutApp> {
         ),
         const SizedBox(height: 1),
         Text(statusText, style: TextStyle(color: statusColor)),
-        const SizedBox(height: 1),
-        // Keymap: disabled (grey) until the corresponding condition holds;
-        // enabled keys keep the bright-key/muted-label colour scheme.
-        Row(children: [
-          _key(_footerHues['info']!, '[t] ', 'test  ',
-              disabled: !_portTestable),
-          _key(_footerHues['info']!, '[Enter] ', 'save  ',
-              disabled: !_portSavable),
-          _key(_footerHues['danger']!, '[Esc] ', 'back'),
-        ]),
       ]),
       ),
     ));
@@ -1872,14 +1895,9 @@ class AppState extends State<AgroutApp> {
                       : const TextStyle(color: Colors.grey),
               ),
             ),
-          const SizedBox(height: 1),
-          Row(children: [
-            _key(_footerHues['page']!, '[up/down] ', 'move   '),
-            _key(_footerHues['action']!, '[Enter] ', 'select   '),
-            _key(_footerHues['danger']!, '[Esc] ', 'cancel'),
-          ]),
-        ]),
+          ],
         ),
+      ),
       ));
     }
     final url = _dailyUrl;
@@ -1900,13 +1918,6 @@ class AppState extends State<AgroutApp> {
           const SizedBox(height: 1),
           const Text('Open it in your browser and sign in to claim today\'s quota.',
               style: TextStyle(color: Colors.grey)),
-          const SizedBox(height: 1),
-          Row(children: [
-            _key(_footerHues['action']!, '[c] ', 'copy URL   '),
-            _key(_footerHues['action']!, '[o] ', 'open in browser   '),
-            _key(_footerHues['danger']!, '[Esc] ', 'back   '),
-            _key(_footerHues['action']!, '[Enter] ', 'done'),
-          ]),
         ]),
       ),
     ));
@@ -1971,15 +1982,10 @@ Color urlColor;
                padding: const EdgeInsets.only(top: 1),
                child: Text('Reason: ${_loginError}', style: TextStyle(color: const Color(0xFFFF8A8A), fontStyle: FontStyle.italic)),
              ),
-            const SizedBox(height: 1),
-            Row(children: [
-              _key(_footerHues['action']!, '[c] ', 'copy URL   '),
-              _key(_footerHues['danger']!, '[Esc] ', 'close'),
-            ]),
-          ]),
-        ),
-      ));
-   }
+         ]),
+       ),
+     ));
+  }
  }
 
 

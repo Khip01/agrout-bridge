@@ -43,6 +43,8 @@ log is a sidebar, fullscreen log when toggled.
 | `p` | Port configuration panel |
 | `t` | Port config | Test the new port (enables `[Enter]` save) |
 | `l` | Local sign-in link panel (paste API key) |
+| `c` | Daily claim dialog (pick GitHub/LinuxDO, copy/open the claim URL) |
+| `Shift+M` | Mark today's daily claim as done (clears the header badge and footer bold) |
 | `Shift+U` | Open update dialog: `[c]` copy command, `[y]` exit like quit (shown when a newer stable exists) |
 | `h` | Help panel |
 | `q` | Quit confirmation |
@@ -56,6 +58,27 @@ log is a sidebar, fullscreen log when toggled.
 | `f` | Toggle log fullscreen / sidebar |
 | `Shift+C` | Clear all log entries (Y/N confirm via status bar) |
 | `Shift+O` | Clear entries before today |
+
+The log header spells out the keys: `[f] fullscreen`, `[Shift+C] clear
+all`, `[Shift+O] clear old only`.
+
+## Daily claim
+
+`[c]` opens a two-stage dialog. Stage one picks the sign-up provider
+(GitHub / LinuxDO) with `up`/`down` and `Enter`; `Esc` cancels. Stage two
+shows the live OAuth authorize URL (built from `/api/oauth/state` and the
+public client ids in `/api/status`):
+
+- `c` copies the URL, `o` opens it in the default browser (where the user
+  is already signed in, so the claim completes in one click).
+- `Esc` returns to the provider picker; `Enter` marks the day as done and
+  closes the dialog.
+
+While the day is still unclaimed, the header shows a `Daily Claim!
+[Shift+M] mark as done` badge (it appears automatically as the clock
+crosses 00:00), and the footer `[c] daily` entry is bold. `[Shift+M]`
+marks the day done, clearing both. The dialog keymap is shown in the
+footer, not inside the dialog.
 
 ## Profile page
 
