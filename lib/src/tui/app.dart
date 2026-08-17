@@ -130,7 +130,6 @@ class AppState extends State<AgroutApp> {
   bool _claimRunning = false;
   bool _claimSurface = false;
   String _claimProgress = '';
-  double _quotaBefore = 0;
   double? _quotaAfter;
   DailyClaimAttempt? _lastAttempt;
 
@@ -926,15 +925,8 @@ class AppState extends State<AgroutApp> {
     _dailyStep = _DailyStep.running;
     _claimRunning = true;
     _claimProgress = 'Opening ${browser!.displayName}...';
-    setState(() {});
-
-    _quotaBefore = 0;
     _quotaAfter = null;
-    try {
-      final sub =
-          await AgentRouterClient().fetchBillingSubscription(apiKey: profile.apiKey);
-      _quotaBefore = (sub['hard_limit_usd'] as num?)?.toDouble() ?? 0;
-    } catch (_) {}
+    setState(() {});
 
     final engine = DailyClaimBrowser(cfg);
     DailyClaimAttempt attempt;
@@ -996,79 +988,74 @@ class AppState extends State<AgroutApp> {
 
   Component _dailyClaimPanel() {
     final blue = const Color(0xFF64B5F6);
-    final cfg = _config.config.dailyClaim;
     final resolved = _dailyResult;
-    final profile = _activeProfile;
+
+    // Fixed dialog width so long sentences wrap instead of running off the
+    // right edge.
+    const dialogWidth = 76.0;
+
+    String _keyLabel() {
+      final profile = _activeProfile;
+      if (profile == null) return 'no API key selected';
+      return 'Your AgentRouter API Key: ${profile.name} (selected)';
+    }
 
     Component buildStatus() {
-      String statusText;
-      Color statusColor;
+      String title;
+      String msg;
+      Color msgColor;
       if (_dailyChecking) {
-        statusText = 'Checking AgentRouter...';
-        statusColor = const Color(0xFFD0D0D0);
+        title = 'Checking your daily reward...';
+        msg = '';
+        msgColor = const Color(0xFFD0D0D0);
       } else if (_dailyPendingConfirm) {
-        statusText = 'Had a claim today? [Shift+Y] yes  [N] no';
-        statusColor = const Color(0xFFFFD75E);
+        title = 'Did you claim your reward today?';
+        msg = 'Press [Shift+Y] if you already did it in the browser, '
+            '[N] otherwise.';
+        msgColor = const Color(0xFFFFD75E);
       } else if (resolved == null) {
-        statusText = 'No check yet';
-        statusColor = const Color(0xFFD0D0D0);
+        title = 'Claim your daily!';
+        msg = '';
+        msgColor = const Color(0xFFD0D0D0);
       } else if (resolved.isConfirmed) {
-        statusText = 'Claimed today: ${resolved.detail}';
-        statusColor = const Color(0xFF7FE0A0);
+        title = 'You already claimed today!';
+        msg = resolved.detail;
+        msgColor = const Color(0xFF7FE0A0);
       } else if (resolved.isNotClaimed) {
-        statusText = 'Not claimed today yet: ${resolved.detail}';
-        statusColor = blue;
+        title = 'Daily reward not claimed yet.';
+        msg = resolved.detail;
+        msgColor = blue;
       } else {
-        // The `unknown` detail should read like an instruction, not internal
-        // jargon (e.g. when a shopping-limited key offers no billing signal).
-        statusText = resolved.detail.isEmpty
-            ? 'Could not check the claim automatically.'
-            : resolved.detail;
-        statusColor = const Color(0xFFFF8A8A);
+        title = 'Could not check automatically.';
+        msg = 'Press [a] below to open the automatic claim once. '
+            'It will use your own browser; nothing leaves your machine.';
+        msgColor = const Color(0xFFFF8A8A);
       }
-      return Column(mainAxisSize: MainAxisSize.min, children: [
-        Text('Claim your daily!', style: TextStyle(fontWeight: FontWeight.bold, color: blue)),
+      return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title, style: TextStyle(fontWeight: FontWeight.bold, color: blue)),
         const SizedBox(height: 1),
-        Text('Window: \$${cfg.expectedAmount.toStringAsFixed(cfg.expectedAmount % 1 == 0 ? 0 : 2)} '
-            '+/- \$${cfg.tolerance.toStringAsFixed(1)} '
-            '(mode: ${cfg.mode}, browser: ${cfg.browser ?? 'manual'})'),
+        Text(_keyLabel(), style: const TextStyle(color: Color(0xFF8A8A8A))),
         const SizedBox(height: 1),
-        Text('Key: ${profile?.name ?? 'none'}'),
-        const SizedBox(height: 1),
-        Text(statusText, style: TextStyle(color: statusColor)),
-        if (resolved != null && resolved.isUnknown) ...[
+        if (msg.isNotEmpty) ...[
+          Text(msg, style: TextStyle(color: msgColor)),
           const SizedBox(height: 1),
-          const Text('Press [a] to run the automatic claim once '
-              '(opens your browser).', style: TextStyle(color: Color(0xFFFFD75E))),
         ],
-        if (_dailyPendingConfirm) ...[
-          const SizedBox(height: 1),
-          const Text('Mark done only after you actually claimed in the browser.',
-              style: TextStyle(color: Color(0xFFD0D0D0))),
-        ],
-        const SizedBox(height: 1),
-        Text('[c] copy login URL   [a] auto claim   [r] re-check   '
-            '[Shift+Y] mark done   [Esc] close',
-            style: const TextStyle(color: Color(0xFFD0D0D0))),
-        const SizedBox(height: 1),
-        const Text('Auto claim uses your own browser via Playwright; '
-            'nothing is shared outside this machine.',
-            style: TextStyle(color: Color(0xFF8A8A8A))),
+        Text('[a] open automatic claim    [c] copy login page    '
+            '[r] check again\n[Shift+Y] I claimed it myself    [Esc] close',
+            style: const TextStyle(color: Color(0xFF8A8A8A))),
       ]);
     }
 
     Component buildInstall() {
-      return Column(mainAxisSize: MainAxisSize.min, children: [
-        const Text('Browser automation needs a one-time setup.',
-            style: TextStyle(fontWeight: FontWeight.bold)),
+      return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('One-time setup needed.',
+            style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64B5F6))),
         const SizedBox(height: 1),
-        Text(PlaywrightBootstrap.describeDownload()),
+        const Text('To claim automatically, the bridge needs a small tool '
+            'installed once (about 50-80 MB). Your browser is reused, '
+            'no extra browser is downloaded.'),
         const SizedBox(height: 1),
-        const Text('Driver + bundled Node (~50-80 MB) are downloaded once; '
-            'your browser binary is reused.',
-            style: TextStyle(color: Color(0xFFD0D0D0))),
-        const SizedBox(height: 1),
-        const Text('[y] install   [n] back', style: TextStyle(color: Color(0xFF8A8A8A))),
+        const Text('[y] install    [n] not now', style: TextStyle(color: Color(0xFF8A8A8A))),
       ]);
     }
 
@@ -1077,45 +1064,41 @@ class AppState extends State<AgroutApp> {
       for (var i = 0; i < _detectedBrowsers.length; i++) {
         final b = _detectedBrowsers[i];
         rows.add(Text(
-          '${i == _browserIndex ? '>' : ' '} ${b.displayName} '
-          '${i == _browserIndex ? '(selected)' : ''}',
+          '${i == _browserIndex ? '>' : ' '} ${b.displayName}'
+          '${i == _browserIndex ? '   (selected)' : ''}',
           style: i == _browserIndex
               ? const TextStyle(color: Color(0xFF7FE0A0))
               : null,
         ));
       }
-      return Column(mainAxisSize: MainAxisSize.min, children: [
-        Text('Pick the browser you use to log in to AgentRouter.',
-            style: TextStyle(fontWeight: FontWeight.bold, color: blue)),
-        const SizedBox(height: 1),
-        Text('Detected: ${_detectedBrowsers.length}'),
+      return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Which browser do you use for AgentRouter?',
+            style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64B5F6))),
         const SizedBox(height: 1),
         ...rows,
         const SizedBox(height: 1),
-        const Text('A dedicated automation profile will be created under the '
-            'bridge config dir; your daily browser is not touched.',
-            style: TextStyle(color: Color(0xFF8A8A8A))),
+        const Text('The bridge will create its own separate browser profile '
+            'for claiming. Your normal browser and its data stay untouched.'),
         const SizedBox(height: 1),
-        const Text('[up/down] move   [Enter] confirm   [Esc] back',
+        const Text('[up/down] choose    [Enter] confirm    [Esc] back',
             style: TextStyle(color: Color(0xFF8A8A8A))),
       ]);
     }
 
     Component buildModeSelect() {
-      return Column(mainAxisSize: MainAxisSize.min, children: [
-        Text('Run the claim in the background or watch it?',
-            style: TextStyle(fontWeight: FontWeight.bold, color: blue)),
+      return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Watch the claim or run it quietly?',
+            style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64B5F6))),
         const SizedBox(height: 1),
-        const Text('[b] background (headless, no window)', style: TextStyle(color: Color(0xFFD0D0D0))),
-        const Text('[s] surface (browser opens so you can watch / finish 2FA or GitHub login)',
-            style: TextStyle(color: Color(0xFFD0D0D0))),
+        const Text('[b] background (no window)'),
+        const Text('[s] show the browser (lets you log in to GitHub if needed)'),
         const SizedBox(height: 1),
         const Text('[Esc] back', style: TextStyle(color: Color(0xFF8A8A8A))),
       ]);
     }
 
     Component buildRunning() {
-      return Column(mainAxisSize: MainAxisSize.min, children: [
+      return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('Claiming your daily${_claimRunning ? '...' : ''}',
             style: TextStyle(fontWeight: FontWeight.bold, color: blue)),
         const SizedBox(height: 1),
@@ -1125,44 +1108,44 @@ class AppState extends State<AgroutApp> {
 
     Component buildDone() {
       final a = _lastAttempt;
+      final ok = a?.success == true;
       final detail = _dailyResult?.detail ?? '';
-      return Column(mainAxisSize: MainAxisSize.min, children: [
-        Text(a?.success == true ? 'Daily claim done!' : 'Daily claim did not complete.',
+      return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(ok ? 'Your daily reward is claimed!' : 'Claim did not finish.',
             style: TextStyle(fontWeight: FontWeight.bold,
-                color: a?.success == true ? const Color(0xFF7FE0A0) : const Color(0xFFFF8A8A))),
+                color: ok ? const Color(0xFF7FE0A0) : const Color(0xFFFF8A8A))),
         const SizedBox(height: 1),
-        Text(detail, style: const TextStyle(color: Color(0xFFD0D0D0))),
-        if (a?.success == true && _quotaBefore > 0) ...[
-          const SizedBox(height: 1),
-          Text('Billing hard limit before: \$${_quotaBefore.toStringAsFixed(2)}',
+        if (a?.success == true) ...[
+          if (_quotaAfter != null)
+            Text('Account quota now: \$${_quotaAfter!.toStringAsFixed(2)}',
+                style: const TextStyle(color: Color(0xFF7FE0A0)))
+          else
+            const Text('Account quota will be checked on next refresh.'),
+        ] else
+          Text(detail.isEmpty ? 'Please try again, or claim it manually in the browser.' : detail,
               style: const TextStyle(color: Color(0xFFD0D0D0))),
-        ],
-        if (a?.success == true && _quotaAfter != null) ...[
-          const SizedBox(height: 1),
-          Text('Account quota after: \$${_quotaAfter!.toStringAsFixed(2)}',
-              style: const TextStyle(color: Color(0xFF7FE0A0))),
-        ],
-        if (a?.sessionCookie != null) ...[
-          const SizedBox(height: 1),
-          const Text('Session cookie captured for future automated checks.',
-              style: TextStyle(color: Color(0xFF8A8A8A))),
-        ],
+        const SizedBox(height: 1),
+        const Text('From now on the bridge can check your daily claim '
+            'automatically each day.', style: TextStyle(color: Color(0xFF8A8A8A))),
         const SizedBox(height: 1),
         const Text('[Esc] close', style: TextStyle(color: Color(0xFF8A8A8A))),
       ]);
     }
 
-    return Center(child: Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(border: BoxBorder.all(color: blue)),
-      child: switch (_dailyStep) {
-        _DailyStep.status => buildStatus(),
-        _DailyStep.installConfirm => buildInstall(),
-        _DailyStep.browserSelect => buildBrowserSelect(),
-        _DailyStep.modeSelect => buildModeSelect(),
-        _DailyStep.running => buildRunning(),
-        _DailyStep.done => buildDone(),
-      },
+    return Center(child: SizedBox(
+      width: dialogWidth,
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(border: BoxBorder.all(color: blue)),
+        child: switch (_dailyStep) {
+          _DailyStep.status => buildStatus(),
+          _DailyStep.installConfirm => buildInstall(),
+          _DailyStep.browserSelect => buildBrowserSelect(),
+          _DailyStep.modeSelect => buildModeSelect(),
+          _DailyStep.running => buildRunning(),
+          _DailyStep.done => buildDone(),
+        },
+      ),
     ));
   }
 
