@@ -938,8 +938,13 @@ class AppState extends State<AgroutApp> {
       );
     } catch (e) {
       _claimRunning = false;
-      _dailyStep = _DailyStep.status;
-      _dailyResult = ClaimCheckResult.unknown('claim failed: $e');
+      _lastAttempt = DailyClaimAttempt(
+        success: false,
+        message: '$e',
+      );
+      _dailyResult = ClaimCheckResult.unknown('$e');
+      LogStore.info('Daily claim: failed - $e');
+      _dailyStep = _DailyStep.done;
       if (mounted) setState(() {});
       return;
     }
@@ -1000,6 +1005,16 @@ class AppState extends State<AgroutApp> {
       return 'Your AgentRouter API Key: ${profile.name} (selected)';
     }
 
+    // One keymap per row: the key is highlighted, the label stays plain so
+    // the eye can pick out which button to press.
+    Component _keyHint(String key, String label) {
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        Text(key, style: const TextStyle(color: Color(0xFF7FE0A0), fontWeight: FontWeight.bold)),
+        const Text('  ', style: TextStyle(color: Color(0xFF8A8A8A))),
+        Text(label, style: const TextStyle(color: Color(0xFF8A8A8A))),
+      ]);
+    }
+
     Component buildStatus() {
       String title;
       String msg;
@@ -1040,9 +1055,12 @@ class AppState extends State<AgroutApp> {
           Text(msg, style: TextStyle(color: msgColor)),
           const SizedBox(height: 1),
         ],
-        Text('[a] open automatic claim    [c] copy login page    '
-            '[r] check again\n[Shift+Y] I claimed it myself    [Esc] close',
-            style: const TextStyle(color: Color(0xFF8A8A8A))),
+        const SizedBox(height: 1),
+        _keyHint('[a]', 'open automatic claim'),
+        _keyHint('[c]', 'copy login page'),
+        _keyHint('[r]', 'check again'),
+        _keyHint('[Shift+Y]', 'I claimed it myself'),
+        _keyHint('[Esc]', 'close'),
       ]);
     }
 
@@ -1055,7 +1073,9 @@ class AppState extends State<AgroutApp> {
             'installed once (about 50-80 MB). Your browser is reused, '
             'no extra browser is downloaded.'),
         const SizedBox(height: 1),
-        const Text('[y] install    [n] not now', style: TextStyle(color: Color(0xFF8A8A8A))),
+        const SizedBox(height: 1),
+        _keyHint('[y]', 'install'),
+        _keyHint('[n]', 'not now'),
       ]);
     }
 
@@ -1080,8 +1100,10 @@ class AppState extends State<AgroutApp> {
         const Text('The bridge will create its own separate browser profile '
             'for claiming. Your normal browser and its data stay untouched.'),
         const SizedBox(height: 1),
-        const Text('[up/down] choose    [Enter] confirm    [Esc] back',
-            style: TextStyle(color: Color(0xFF8A8A8A))),
+        const SizedBox(height: 1),
+        _keyHint('[up/down]', 'choose'),
+        _keyHint('[Enter]', 'confirm'),
+        _keyHint('[Esc]', 'back'),
       ]);
     }
 
@@ -1090,19 +1112,27 @@ class AppState extends State<AgroutApp> {
         const Text('Watch the claim or run it quietly?',
             style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF64B5F6))),
         const SizedBox(height: 1),
-        const Text('[b] background (no window)'),
-        const Text('[s] show the browser (lets you log in to GitHub if needed)'),
+        _keyHint('[b]', 'background (no window)'),
+        _keyHint('[s]', 'show the browser (lets you log in to GitHub if needed)'),
         const SizedBox(height: 1),
-        const Text('[Esc] back', style: TextStyle(color: Color(0xFF8A8A8A))),
+        const SizedBox(height: 1),
+        _keyHint('[Esc]', 'back'),
       ]);
     }
 
     Component buildRunning() {
+      final watching = _claimSurface;
       return Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('Claiming your daily${_claimRunning ? '...' : ''}',
             style: TextStyle(fontWeight: FontWeight.bold, color: blue)),
         const SizedBox(height: 1),
         Text(_claimProgress, style: const TextStyle(color: Color(0xFFD0D0D0))),
+        if (watching && _claimRunning) ...[
+          const SizedBox(height: 1),
+          const Text('A browser window opened. If it asks you to log in to '
+              'GitHub, complete it there, then come back here. '
+              'This step takes a few seconds.', style: TextStyle(color: Color(0xFF8A8A8A))),
+        ],
       ]);
     }
 
@@ -1121,14 +1151,19 @@ class AppState extends State<AgroutApp> {
                 style: const TextStyle(color: Color(0xFF7FE0A0)))
           else
             const Text('Account quota will be checked on next refresh.'),
+          const SizedBox(height: 1),
+          const Text('From now on the bridge can check your daily claim '
+              'automatically each day.', style: TextStyle(color: Color(0xFF8A8A8A))),
         ] else
-          Text(detail.isEmpty ? 'Please try again, or claim it manually in the browser.' : detail,
+          Text(
+              detail.isEmpty
+                  ? 'The browser did not finish the login. Try again, or '
+                      'claim it manually in the browser.'
+                  : detail,
               style: const TextStyle(color: Color(0xFFD0D0D0))),
         const SizedBox(height: 1),
-        const Text('From now on the bridge can check your daily claim '
-            'automatically each day.', style: TextStyle(color: Color(0xFF8A8A8A))),
         const SizedBox(height: 1),
-        const Text('[Esc] close', style: TextStyle(color: Color(0xFF8A8A8A))),
+        _keyHint('[Esc]', 'close'),
       ]);
     }
 
