@@ -32,6 +32,16 @@
 - **Daily-claim URL dialog has a fixed max width.** The long OAuth authorize
   URL used to stretch the dialog past half the screen. The dialog is now
   capped at 80 columns so the URL wraps in place and the box stays compact.
+- **Port-config panel keymap renders on one line.** The `[t] test`
+  `[Enter] save` `[Esc] back` keymap was laid out as separate rows inside
+  the panel (stacked vertically). It is now a single row with the shared
+  keymap styles: enabled keys use the bright-key/muted-label colours,
+  disabled keys (and their labels) are grey until the condition holds.
+- **All dialogs follow the footer keymap style.** Update-confirm
+  (`[c] [y] [n]`), quit/delete confirm (`[y] Yes [n] No`), the log clear
+  confirmation (`[Y]es [N]o`) and the daily-claim provider/URL keymaps now
+  use the same bright-key/muted-label palette; nothing is emboldened except
+  the pending `[c] daily` entry.
 
 ## v0.1.21 (2026-08-16)
 

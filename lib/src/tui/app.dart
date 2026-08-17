@@ -1182,16 +1182,19 @@ class AppState extends State<AgroutApp> {
 
   /// Render one keymap segment: [keyPart] in the bright hue, [labelPart] in
   /// the muted hue. [boldAll] forces every span to embolden (used by the
-  /// `[c] daily` entry while the claim is pending).
+  /// `[c] daily` entry while the claim is pending). [disabled] renders both
+  /// spans grey (an unavailable action, e.g. save before a port test passes).
   Component _key(List<Color> hues, String keyPart, String labelPart,
-      {bool boldAll = false}) {
+      {bool boldAll = false, bool disabled = false}) {
+    final keyColor = disabled ? Colors.grey : hues[0];
+    final labelColor = disabled ? Colors.grey : hues[1];
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Text(keyPart,
           style: TextStyle(
-              color: hues[0], fontWeight: boldAll ? FontWeight.bold : null)),
+              color: keyColor, fontWeight: boldAll ? FontWeight.bold : null)),
       Text(labelPart,
           style: TextStyle(
-              color: hues[1], fontWeight: boldAll ? FontWeight.bold : null)),
+              color: labelColor, fontWeight: boldAll ? FontWeight.bold : null)),
     ]);
   }
 
@@ -1278,12 +1281,16 @@ class AppState extends State<AgroutApp> {
       if (_confirmClear != _ClearScope.none)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 0),
-          child: Text(
-            _confirmClear == _ClearScope.all
-                ? ' Clear ALL entries? [Y]es  [N]o'
-                : ' Clear entries before today? [Y]es  [N]o',
-            style: const TextStyle(color: Color(0xFFFFB347), fontWeight: FontWeight.bold),
-          ),
+          child: Row(children: [
+            Text(
+              _confirmClear == _ClearScope.all
+                  ? ' Clear ALL entries? '
+                  : ' Clear entries before today? ',
+              style: const TextStyle(color: Color(0xFFFFB347), fontWeight: FontWeight.bold),
+            ),
+            _key(_footerHues['action']!, '[Y]', 'es  '),
+            _key(_footerHues['danger']!, '[N]', 'o'),
+          ]),
         ),
       Expanded(
         child: Scrollbar(
@@ -1406,7 +1413,10 @@ class AppState extends State<AgroutApp> {
         const SizedBox(height: 1),
         Text('Remove "${target?.name ?? ''}" and its API key?'),
         const SizedBox(height: 1),
-        const Text('[y] Yes  [n] No'),
+        Row(children: [
+          _key(_footerHues['action']!, '[y] ', 'Yes   '),
+          _key(_footerHues['danger']!, '[n] ', 'No'),
+        ]),
       ]),
     ));
   }
@@ -1460,8 +1470,11 @@ class AppState extends State<AgroutApp> {
         const SizedBox(height: 1),
         const Text('  agrout-bridge update', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 1),
-        Text('[c] copy command    [y] close TUI    [n] back',
-            style: const TextStyle(color: Color(0xFFD0D0D0))),
+        Row(children: [
+          _key(_footerHues['action']!, '[c] ', 'copy command   '),
+          _key(_footerHues['update']!, '[y] ', 'close TUI   '),
+          _key(_footerHues['danger']!, '[n] ', 'back'),
+        ]),
       ]),
     ));
   }
@@ -1476,7 +1489,10 @@ class AppState extends State<AgroutApp> {
         const SizedBox(height: 1),
         Text('Proxy will stop at http://${_config.config.listenAddress}:${_config.config.serverPort}'),
         const SizedBox(height: 1),
-        const Text('[y] Yes  [n] No'),
+        Row(children: [
+          _key(_footerHues['action']!, '[y] ', 'Yes   '),
+          _key(_footerHues['danger']!, '[n] ', 'No'),
+        ]),
       ]),
     ));
   }
@@ -1627,12 +1643,8 @@ class AppState extends State<AgroutApp> {
       statusColor = Colors.grey;
     }
 
-    // Keymap: grey = disabled. [t] test needs a different port; [Enter] save
-    // only lights up after a successful test of that port; [Esc] is red.
-    final disabled = TextStyle(color: Colors.grey);
-    final active = TextStyle(color: const Color(0xFF5BA4F5), fontWeight: FontWeight.bold); // info blue
-    final esc = TextStyle(color: const Color(0xFFFF6B6B), fontWeight: FontWeight.bold); // red
-
+    // Keymap: disabled (grey) until the corresponding condition holds;
+    // enabled keys keep the bright-key/muted-label colour scheme.
     return Center(child: Container(
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(border: BoxBorder.all(color: Colors.cyan)),
@@ -1665,12 +1677,15 @@ class AppState extends State<AgroutApp> {
         const SizedBox(height: 1),
         Text(statusText, style: TextStyle(color: statusColor)),
         const SizedBox(height: 1),
-        Text('[t] ', style: _portTestable ? active : disabled),
-        Text('test  ', style: _portTestable ? active : disabled),
-        Text('[Enter] ', style: _portSavable ? active : disabled),
-        Text('save  ', style: _portSavable ? active : disabled),
-        Text('[Esc] ', style: esc),
-        Text('back', style: esc),
+        // Keymap: disabled (grey) until the corresponding condition holds;
+        // enabled keys keep the bright-key/muted-label colour scheme.
+        Row(children: [
+          _key(_footerHues['info']!, '[t] ', 'test  ',
+              disabled: !_portTestable),
+          _key(_footerHues['info']!, '[Enter] ', 'save  ',
+              disabled: !_portSavable),
+          _key(_footerHues['danger']!, '[Esc] ', 'back'),
+        ]),
       ]),
     ));
   }
@@ -1844,8 +1859,11 @@ class AppState extends State<AgroutApp> {
               ),
             ),
           const SizedBox(height: 1),
-          const Text('[up/down] move   [Enter] select   [Esc] cancel',
-              style: TextStyle(color: Colors.grey)),
+          Row(children: [
+            _key(_footerHues['page']!, '[up/down] ', 'move   '),
+            _key(_footerHues['action']!, '[Enter] ', 'select   '),
+            _key(_footerHues['danger']!, '[Esc] ', 'cancel'),
+          ]),
         ]),
       ));
     }
@@ -1868,8 +1886,12 @@ class AppState extends State<AgroutApp> {
           const Text('Open it in your browser and sign in to claim today\'s quota.',
               style: TextStyle(color: Colors.grey)),
           const SizedBox(height: 1),
-          const Text('[c] copy URL   [o] open in browser   [Esc] back   [Enter] done',
-              style: TextStyle(color: Colors.grey)),
+          Row(children: [
+            _key(_footerHues['action']!, '[c] ', 'copy URL   '),
+            _key(_footerHues['action']!, '[o] ', 'open in browser   '),
+            _key(_footerHues['danger']!, '[Esc] ', 'back   '),
+            _key(_footerHues['action']!, '[Enter] ', 'done'),
+          ]),
         ]),
       ),
     ));
@@ -1882,35 +1904,27 @@ class AppState extends State<AgroutApp> {
      //   success -> soft green (positive, not jarring)
      //   failed  -> warm red (clear error, not screaming)
      //   loading -> soft cyan (neutral activity)
-     Color urlColor;
+Color urlColor;
      Color borderColor;
      Color titleColor;
-     Color copyColor;   // color of [c] copy URL hint (primary action)
-     Color escColor;    // color of [Esc] hint
      Color msgColor;
      String urlText;
      if (_loginState == _LoginState.success) {
        borderColor = const Color(0xFF8BD4BA); // soft green
        titleColor = const Color(0xFF8BD4BA);
        urlColor = const Color(0xFF8BD4BA);
-copyColor = Colors.grey;
-        escColor = const Color(0xFFFF6B6B);     // Esc (close) is always red
        msgColor = const Color(0xFF8BD4BA);
        urlText = 'done';
      } else if (_loginState == _LoginState.failed) {
        borderColor = const Color(0xFFFF8A8A); // warm red (pastel)
        titleColor = const Color(0xFFFF8A8A);
        urlColor = const Color(0xFFFF8A8A);
-       copyColor = const Color(0xFFFFB347);              // warm amber - retry action pops
-       escColor = const Color(0xFFFF6B6B);
        msgColor = const Color(0xFFFF8A8A);
        urlText = _loginUrl ?? '(unavailable)';
      } else if (_loginState == _LoginState.loading) {
        borderColor = Colors.grey;
        titleColor = Colors.cyan;
        urlColor = Colors.grey;
-       copyColor = Colors.grey;
-       escColor = const Color(0xFFFF6B6B);
        msgColor = Colors.cyan;
        urlText = 'Starting server...';
      } else {
@@ -1918,8 +1932,6 @@ copyColor = Colors.grey;
        borderColor = const Color(0xFFD19A66); // warm amber
        titleColor = const Color(0xFFD19A66);
        urlColor = const Color(0xFFD19A66);
-       copyColor = const Color(0xFFD19A66);  // primary action matches border
-       escColor = const Color(0xFFFF6B6B);
        msgColor = Colors.grey;
        urlText = _loginUrl ?? '(unavailable)';
      }
@@ -1944,14 +1956,14 @@ copyColor = Colors.grey;
                padding: const EdgeInsets.only(top: 1),
                child: Text('Reason: ${_loginError}', style: TextStyle(color: const Color(0xFFFF8A8A), fontStyle: FontStyle.italic)),
              ),
-           const SizedBox(height: 1),
-           Row(children: [
-             Text('[c] copy URL  ', style: TextStyle(color: copyColor)),
-             Text('[Esc] close', style: TextStyle(color: escColor)),
-           ]),
-         ]),
-       ),
-     ));
+            const SizedBox(height: 1),
+            Row(children: [
+              _key(_footerHues['action']!, '[c] ', 'copy URL   '),
+              _key(_footerHues['danger']!, '[Esc] ', 'close'),
+            ]),
+          ]),
+        ),
+      ));
    }
  }
 
