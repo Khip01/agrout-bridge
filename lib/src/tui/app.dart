@@ -1118,16 +1118,26 @@ class AppState extends State<AgroutApp> {
   }
 
   // ── Footer ────────────────────────────────────────────────────────
+  /// Bright key / muted label pairs for the footer keymap. Each action keeps
+  /// its own hue (something pressable is coloured), but the key is brighter
+  /// than its label and nothing is emboldened except the daily entry while it
+  /// still needs claiming today.
+  static const _footerHues = <String, List<Color>>{
+    'nav': [Colors.cyan, Color(0xFF5C8A98)],
+    'action': [Color(0xFF8BD4BA), Color(0xFF5E8A77)],
+    'config': [Color(0xFFD19A66), Color(0xFF8F6F48)],
+    'update': [Color(0xFFFFD75E), Color(0xFFA98A3A)],
+    'info': [Color(0xFF5BA4F5), Color(0xFF47769F)],
+    'danger': [Color(0xFFFF6B6B), Color(0xFF9A4F4F)],
+    'ctrl': [Color(0xFF9C8FFF), Color(0xFF6C62B8)],
+    'page': [Color(0xFFE08BFF), Color(0xFF9C62B8)],
+  };
+
   Component _buildFooter() {
-    // Global keymap renders as plain text by design: only the daily-claim
-    // entry is emboldened, and only while it still needs claiming today.
     final base = TextStyle(color: Colors.grey);
-    final dailyKey = _dailyDoneToday
-        ? base
-        : const TextStyle(color: Color(0xFFFFD75E), fontWeight: FontWeight.bold);
-    final dailyLabel = _dailyDoneToday
-        ? base
-        : const TextStyle(color: Color(0xFFD19A66), fontWeight: FontWeight.bold);
+    // Daily entry: fully bold while the claim is still pending (status bar
+    // indicator), back to the usual bright-key/muted-label when done.
+    final dailyBold = !_dailyDoneToday;
     if (_panel != _Panel.main) {
       final hint = _panel == _Panel.login
           ? '[c] copy URL | [Esc] close'
@@ -1145,50 +1155,64 @@ class AppState extends State<AgroutApp> {
         child: Text(' $hint', style: base),
       );
     }
+    final nav = _footerHues['nav']!;
+    final action = _footerHues['action']!;
+    final config = _footerHues['config']!;
+    final update = _footerHues['update']!;
+    final info = _footerHues['info']!;
+    final danger = _footerHues['danger']!;
+    final ctrl = _footerHues['ctrl']!;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 1),
       child: Row(children: [
-        Text('[1-4] page  ', style: base),
-        Text('[r] refresh  ', style: base),
-        Text('[o]/[a] copy endpoint  ', style: base),
-        Text('[p] port  ', style: base),
-        Text('[l] login  ', style: base),
-        if (_updateTag != null) Text('[Shift+U] update  ', style: base),
-        Text('[c] ', style: dailyKey),
-        Text('daily  ', style: dailyLabel),
-        Text('[h] help  ', style: base),
-        Text('[q] quit  ', style: base),
-        Text('[Ctrl+L] log', style: base),
-        ..._pageScopedFooter(base),
+        _key(nav, '[1-4] ', 'page  '),
+        _key(action, '[r] ', 'refresh  '),
+        _key(action, '[o]/[a] ', 'copy endpoint  '),
+        _key(config, '[p] ', 'port  '),
+        _key(action, '[l] ', 'login  '),
+        if (_updateTag != null) _key(update, '[Shift+U] ', 'update  '),
+        _key(update, '[c] ', 'daily  ', boldAll: dailyBold),
+        _key(info, '[h] ', 'help  '),
+        _key(danger, '[q] ', 'quit  '),
+        _key(ctrl, '[Ctrl+L] ', 'log'),
+        ..._pageScopedFooter(),
       ]),
     );
   }
 
+  /// Render one keymap segment: [keyPart] in the bright hue, [labelPart] in
+  /// the muted hue. [boldAll] forces every span to embolden (used by the
+  /// `[c] daily` entry while the claim is pending).
+  Component _key(List<Color> hues, String keyPart, String labelPart,
+      {bool boldAll = false}) {
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Text(keyPart,
+          style: TextStyle(
+              color: hues[0], fontWeight: boldAll ? FontWeight.bold : null)),
+      Text(labelPart,
+          style: TextStyle(
+              color: hues[1], fontWeight: boldAll ? FontWeight.bold : null)),
+    ]);
+  }
+
   /// Keys that only work on the current page, highlighted so the user sees
   /// there is extra keymap available beyond the global footer keys.
-  List<Component> _pageScopedFooter(TextStyle base) {
-    final pageStyle = TextStyle(
-      color: const Color(0xFFE08BFF), // bright violet, distinct from nav/action/config
-      fontWeight: FontWeight.bold,
-    );
+  List<Component> _pageScopedFooter() {
+    final base = const TextStyle(color: Colors.grey);
+    final page = _footerHues['page']!;
     switch (_infoPage) {
       case _InfoPage.profile:
         return [
           Text('  |  ', style: base),
-          Text('[up/down] ', style: pageStyle),
-          Text('pick  ', style: pageStyle),
-          Text('[Enter] ', style: pageStyle),
-          Text('switch  ', style: pageStyle),
-          Text('[Shift+D] ', style: pageStyle),
-          Text('delete', style: pageStyle),
+          _key(page, '[up/down] ', 'pick  '),
+          _key(page, '[Enter] ', 'switch  '),
+          _key(page, '[Shift+D] ', 'delete'),
         ];
       case _InfoPage.models:
         return [
           Text('  |  ', style: base),
-          Text('[up/down] ', style: pageStyle),
-          Text('pick  ', style: pageStyle),
-          Text('[Enter] ', style: pageStyle),
-          Text('copy id', style: pageStyle),
+          _key(page, '[up/down] ', 'pick  '),
+          _key(page, '[Enter] ', 'copy id'),
         ];
       case _InfoPage.usage:
       case _InfoPage.proxy:
@@ -1246,9 +1270,9 @@ class AppState extends State<AgroutApp> {
       Row(children: [
         Text(fullscreen ? ' LOG (fullscreen)' : ' LOG', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF9C8FFF))),
         const Spacer(),
-        if (!fullscreen) const Text('[f]ull ', style: TextStyle(color: Color(0xFF9C8FFF))),
-        const Text('[Shift+C]lear ', style: TextStyle(color: Color(0xFF9C8FFF))),
-        const Text('[Shift+O]ld ', style: TextStyle(color: Color(0xFF9C8FFF))),
+        if (!fullscreen) _key(_footerHues['ctrl']!, '[f]', 'ull  '),
+        _key(_footerHues['ctrl']!, '[Shift+C]', 'lear  '),
+        _key(_footerHues['ctrl']!, '[Shift+O]', 'ld'),
       ]),
       Container(height: 1, color: Colors.grey),
       if (_confirmClear != _ClearScope.none)
@@ -1827,24 +1851,27 @@ class AppState extends State<AgroutApp> {
     }
     final url = _dailyUrl;
     final label = _dailyProviderLabel(_dailyProviders[_dailyProviderIndex]);
-    return Center(child: Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(border: BoxBorder.all(color: const Color(0xFFD19A66))),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Text('Daily claim - $label',
-            style: const TextStyle(color: Color(0xFFD19A66), fontWeight: FontWeight.bold)),
-        const SizedBox(height: 1),
-        if (_dailyLoading)
-          const Text('Fetching login URL...', style: TextStyle(color: Colors.grey))
-        else
-          Text(url ?? '(unavailable)', style: const TextStyle(color: Color(0xFF8BD4BA))),
-        const SizedBox(height: 1),
-        const Text('Open it in your browser and sign in to claim today\'s quota.',
-            style: TextStyle(color: Colors.grey)),
-        const SizedBox(height: 1),
-        const Text('[c] copy URL   [o] open in browser   [Esc] back   [Enter] done',
-            style: TextStyle(color: Colors.grey)),
-      ]),
+    return Center(child: SizedBox(
+      width: 80, // cap the dialog so a long authorize URL wraps, not the dialog
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(border: BoxBorder.all(color: const Color(0xFFD19A66))),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('Daily claim - $label',
+              style: const TextStyle(color: Color(0xFFD19A66), fontWeight: FontWeight.bold)),
+          const SizedBox(height: 1),
+          if (_dailyLoading)
+            const Text('Fetching login URL...', style: TextStyle(color: Colors.grey))
+          else
+            Text(url ?? '(unavailable)', style: const TextStyle(color: Color(0xFF8BD4BA))),
+          const SizedBox(height: 1),
+          const Text('Open it in your browser and sign in to claim today\'s quota.',
+              style: TextStyle(color: Colors.grey)),
+          const SizedBox(height: 1),
+          const Text('[c] copy URL   [o] open in browser   [Esc] back   [Enter] done',
+              style: TextStyle(color: Colors.grey)),
+        ]),
+      ),
     ));
   }
 

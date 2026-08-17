@@ -21,10 +21,17 @@
 
 ### Fix
 
-- **Global footer keymap is plain text.** Only the `[c] daily` entry is
-  emboldened, and only while that day's claim is still pending; once marked
-  done it renders like every other key. The log panel labels now spell out
-  the modifier: `[Shift+C]lear` and `[Shift+O]ld`.
+- **Footer keys keep their colour, only the emboldening changed.** Each
+  keymap entry returns to its original hue (something pressable is
+  coloured), but the key renders brighter than its label and the label uses
+  a muted shade of the same colour. Nothing is bold except the `[c] daily`
+  entry, and only while that day's claim is still pending: it renders fully
+  bold (key + label) until marked done, then reverts to the
+  bright-key/muted-label look. The log panel header and the page-scoped
+  footer keys follow the same bright-key/muted-label pattern.
+- **Daily-claim URL dialog has a fixed max width.** The long OAuth authorize
+  URL used to stretch the dialog past half the screen. The dialog is now
+  capped at 80 columns so the URL wraps in place and the box stays compact.
 
 ## v0.1.21 (2026-08-16)
 
