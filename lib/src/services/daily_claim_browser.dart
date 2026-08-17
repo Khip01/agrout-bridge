@@ -86,12 +86,25 @@ class DailyClaimBrowser {
                 RegExp(r'GitHub.*继续|Continue.*GitHub|Sign in with GitHub'))
             .click(timeout: 60000);
 
-        onProgress?.call('Waiting for GitHub authorize + redirect back...');
-        // With a remembered GitHub session this returns to agentrouter.org;
-        // otherwise the user completes login/2FA in the (surface) window.
-        await page.waitForURL(
-            pw.RouteMatcher.regex(RegExp(r'agentrouter\.org')),
-            timeout: 180000);
+        onProgress?.call('Opening GitHub login for the first time...');
+        // First run: the bridge profile has no GitHub session, so GitHub
+        // shows its login page. In surface mode the user signs in there once.
+        onProgress?.call('Sign in to GitHub in the opened window if asked. '
+            'This only happens once.');
+        try {
+          await page.waitForURL(
+              pw.RouteMatcher.regex(RegExp(r'agentrouter\.org')),
+              timeout: 180000);
+        } catch (_) {
+          // Either the browser was closed by the user or GitHub login was not
+          // finished before the timeout. No session was captured.
+          return const DailyClaimAttempt(
+            success: false,
+            message: 'GitHub sign-in was not finished. On the first run you '
+                'must log in to GitHub in the opened window (including 2FA '
+                'if enabled), then let it return to AgentRouter.',
+          );
+        }
         await Future<void>.delayed(const Duration(seconds: 3));
         // Best-effort: pull the session cookie.
         String? session;

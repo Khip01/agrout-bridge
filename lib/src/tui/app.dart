@@ -981,7 +981,7 @@ class AppState extends State<AgroutApp> {
       }
     } else {
       _dailyResult = ClaimCheckResult.unknown(
-          'claim ran but no session cookie found (${attempt.message})');
+          attempt.message.isEmpty ? 'the claim did not complete' : attempt.message);
     }
     _dailyStep = _DailyStep.done;
     if (mounted) setState(() {});
@@ -1139,9 +1139,9 @@ class AppState extends State<AgroutApp> {
         Text(_claimProgress, style: const TextStyle(color: Color(0xFFD0D0D0))),
         if (watching && _claimRunning) ...[
           const SizedBox(height: 1),
-          const Text('A browser window opened. If it asks you to log in to '
-              'GitHub, complete it there, then come back here. '
-              'This step takes a few seconds.', style: TextStyle(color: Color(0xFF8A8A8A))),
+          const Text('A separate browser window opened. The first time, sign '
+              'in to GitHub there (2FA too if you use it). The window returns '
+              'to AgentRouter by itself when it is done.', style: TextStyle(color: Color(0xFF8A8A8A))),
         ],
       ]);
     }
