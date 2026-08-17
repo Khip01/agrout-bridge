@@ -35,10 +35,12 @@ class Updater {
   /// CDN) instead of the rate-limited GitHub API, so the check can refresh
   /// quickly and reflect release deletions without hitting API limits.
   ///
-  /// Order matters: raw.githubusercontent.com is always the freshly-pushed
-  /// `main` file, while jsDelivr is a CDN that can serve a cached copy for a
-  /// while after a push. The raw source must be checked first so a stale CDN
-  /// entry can never hide a newer release.
+  /// Order matters: raw.githubusercontent.com always serves the freshly-pushed
+  /// `main` file, so it is the authoritative source. jsDelivr is only a
+  /// fallback: a CDN might lag behind a push (briefly hiding a new release)
+  /// or, worse, carry a copy of a DELETED release (a phantom update). The raw
+  /// source must win both ways, so it is checked first and a later failure
+  /// falls through to jsDelivr rather than letting a mirror outbid it.
   static const _latestJsonSources = [
     'https://raw.githubusercontent.com/$_owner/$_repo/main/latest.json',
     'https://cdn.jsdelivr.net/gh/$_owner/$_repo@main/latest.json',
@@ -158,8 +160,15 @@ class Updater {
     return _fetchLatestFromTagsApi();
   }
 
-  /// Try each `latest.json` CDN source and return a semver-valid tag, or
-  /// `null` if every source failed.
+  /// Try each `latest.json` mirror in order and return its first semver-valid
+  /// tag, or `null` if every source failed.
+  ///
+  /// raw.githubusercontent.com is checked first because it always serves the
+  /// freshly-pushed `main` file; jsDelivr is only a fallback when the raw
+  /// source fails. A mirror is never allowed to OUTBID the raw source:
+  /// otherwise a lagging jsDelivr copy of a DELETED release would keep showing
+  /// a phantom "update available" forever. Deletions are reflected by lowering
+  /// `latest.json`, and that lower value must win immediately.
   Future<String?> _fetchLatestTagFromCdns() async {
     for (final url in _latestJsonSources) {
       try {

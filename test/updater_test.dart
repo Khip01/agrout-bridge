@@ -193,6 +193,44 @@ void main() {
       expect(jsdelivrCalls, equals(0), reason: 'raw succeeds first; jsDelivr should not be consulted');
     });
 
+    test('raw is authoritative for deletions (a stale CDN can never show a phantom)',
+        () async {
+      // Deletion scenario: raw reflects a removed release (v0.1.8) while a
+      // lagging jsDelivr still serves the removed v0.1.9. latest.json must
+      // stay authoritative, so the raw (lower) tag wins and jsDelivr is not
+      // even consulted. Otherwise a phantom "update available" would stick.
+      var jsdelivrCalls = 0;
+      final u = Updater(httpFetch: (url, _) async {
+        if (url.contains('raw.githubusercontent.com') &&
+            url.contains('latest.json')) {
+          return (statusCode: 200, body: '{"tag":"v0.1.8"}');
+        }
+        if (url.contains('cdn.jsdelivr.net') && url.contains('latest.json')) {
+          jsdelivrCalls++;
+          return (statusCode: 200, body: '{"tag":"v0.1.9"}');
+        }
+        return (statusCode: 404, body: '');
+      });
+      final tag = await u.fetchLatestTag(forceRefresh: true);
+      expect(tag, equals('v0.1.8'));
+      expect(jsdelivrCalls, equals(0));
+    });
+
+    test('jsDelivr is consulted only when raw fails', () async {
+      final u = Updater(httpFetch: (url, _) async {
+        if (url.contains('raw.githubusercontent.com') &&
+            url.contains('latest.json')) {
+          return (statusCode: 404, body: '');
+        }
+        if (url.contains('cdn.jsdelivr.net') && url.contains('latest.json')) {
+          return (statusCode: 200, body: '{"tag":"v0.1.9"}');
+        }
+        return (statusCode: 404, body: '');
+      });
+      final tag = await u.fetchLatestTag(forceRefresh: true);
+      expect(tag, equals('v0.1.9'));
+    });
+
     test('fresh 1-minute cache is served without a network call', () async {
       seedCache('v0.1.11');
       var calls = 0;
