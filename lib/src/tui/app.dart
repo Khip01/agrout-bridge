@@ -6,10 +6,13 @@ import 'package:nocterm/nocterm.dart' hide LogEntry, Clipboard;
 import '../models/profile.dart';
 import '../models/version.dart';
 import '../services/api_client.dart';
+import '../services/daily_claim.dart';
+import '../services/daily_claim_browser.dart';
 import '../services/daily_claim_detector.dart';
 import '../services/daily_claim_tui.dart';
 import '../services/login.dart';
 import '../services/log_store.dart';
+import '../services/playwright_bootstrap.dart';
 import '../services/updater.dart';
 import '../services/usage_store.dart';
 import '../server/server_controller.dart';
@@ -42,6 +45,9 @@ class AgroutApp extends StatefulComponent {
 }
 
 enum _Panel { main, help, quit, login, portConfig, deleteConfirm, updateConfirm, daily }
+
+/// Sub-steps of the daily-claim dialog.
+enum _DailyStep { status, installConfirm, browserSelect, modeSelect, running, done }
 
 enum _InfoPage { profile, usage, models, proxy }
 
@@ -116,6 +122,16 @@ class AppState extends State<AgroutApp> {
   ClaimCheckResult? _dailyResult;
   bool _dailyChecking = false;
   bool _dailyPendingConfirm = false;
+
+  /// Browser-automation sub-step inside the daily dialog.
+  _DailyStep _dailyStep = _DailyStep.status;
+  List<DetectedBrowser> _detectedBrowsers = [];
+  int _browserIndex = 0;
+  bool _claimRunning = false;
+  bool _claimSurface = false;
+  String _claimProgress = '';
+  double _quotaBefore = 0;
+  DailyClaimAttempt? _lastAttempt;
 
   static const _pageNames = ['Profile', 'Usage & Cost', 'Models', 'Proxy Config'];
 
@@ -274,37 +290,104 @@ class AppState extends State<AgroutApp> {
       return false;
     }
     if (_panel == _Panel.daily) {
-      if (_dailyPendingConfirm) {
-        if (e.logicalKey == LogicalKey.keyY && e.isShiftPressed) {
-          _confirmMarkClaimed();
-          return true;
-        }
-        if (e.logicalKey == LogicalKey.keyN || e.logicalKey == LogicalKey.escape) {
-          _dailyPendingConfirm = false;
-          setState(() {});
-          return true;
-        }
-        return false;
+      switch (_dailyStep) {
+        case _DailyStep.status:
+          if (_dailyPendingConfirm) {
+            if (e.logicalKey == LogicalKey.keyY && e.isShiftPressed) {
+              _confirmMarkClaimed();
+              return true;
+            }
+            if (e.logicalKey == LogicalKey.keyN || e.logicalKey == LogicalKey.escape) {
+              _dailyPendingConfirm = false;
+              setState(() {});
+              return true;
+            }
+            return false;
+          }
+          if (e.logicalKey == LogicalKey.keyC && !e.isControlPressed) {
+            unawaited(Clipboard.copy('https://agentrouter.org/login'));
+            _setStatus('Copied AgentRouter login URL to clipboard', duration: 3);
+            return true;
+          }
+          if (e.logicalKey == LogicalKey.keyY && e.isShiftPressed) {
+            _dailyPendingConfirm = true;
+            setState(() {});
+            return true;
+          }
+          if (e.logicalKey == LogicalKey.keyR) {
+            unawaited(_checkDailyClaim());
+            return true;
+          }
+          if (e.logicalKey == LogicalKey.keyA && !e.isControlPressed) {
+            _startClaimFlow();
+            return true;
+          }
+          if (e.logicalKey == LogicalKey.escape || e.logicalKey == LogicalKey.keyQ) {
+            _closeDailyClaim();
+            return true;
+          }
+          return false;
+        case _DailyStep.installConfirm:
+          if (e.logicalKey == LogicalKey.keyY) {
+            _runInstall();
+            return true;
+          }
+          if (e.logicalKey == LogicalKey.keyN || e.logicalKey == LogicalKey.escape) {
+            _dailyStep = _DailyStep.status;
+            setState(() {});
+            return true;
+          }
+          return false;
+        case _DailyStep.browserSelect:
+          if (e.logicalKey == LogicalKey.arrowUp) {
+            if (_browserIndex > 0) _browserIndex--;
+            setState(() {});
+            return true;
+          }
+          if (e.logicalKey == LogicalKey.arrowDown) {
+            if (_browserIndex < _detectedBrowsers.length - 1) _browserIndex++;
+            setState(() {});
+            return true;
+          }
+          if (e.logicalKey == LogicalKey.enter) {
+            _acceptBrowser();
+            return true;
+          }
+          if (e.logicalKey == LogicalKey.escape) {
+            _dailyStep = _DailyStep.status;
+            setState(() {});
+            return true;
+          }
+          return false;
+        case _DailyStep.modeSelect:
+          if (e.logicalKey == LogicalKey.keyB) {
+            _claimSurface = false;
+            unawaited(_runClaim());
+            return true;
+          }
+          if (e.logicalKey == LogicalKey.keyS) {
+            _claimSurface = true;
+            unawaited(_runClaim());
+            return true;
+          }
+          if (e.logicalKey == LogicalKey.escape) {
+            _dailyStep = _DailyStep.status;
+            setState(() {});
+            return true;
+          }
+          return false;
+        case _DailyStep.running:
+          // During automation no keys are handled; the user watches or waits.
+          return false;
+        case _DailyStep.done:
+          if (e.logicalKey == LogicalKey.escape) {
+            _dailyStep = _DailyStep.status;
+            _lastAttempt = null;
+            setState(() {});
+            return true;
+          }
+          return false;
       }
-      if (e.logicalKey == LogicalKey.keyC && !e.isControlPressed) {
-        unawaited(Clipboard.copy('https://agentrouter.org/login'));
-        _setStatus('Copied AgentRouter login URL to clipboard', duration: 3);
-        return true;
-      }
-      if (e.logicalKey == LogicalKey.keyY && e.isShiftPressed) {
-        _dailyPendingConfirm = true;
-        setState(() {});
-        return true;
-      }
-      if (e.logicalKey == LogicalKey.keyR) {
-        unawaited(_checkDailyClaim());
-        return true;
-      }
-      if (e.logicalKey == LogicalKey.escape || e.logicalKey == LogicalKey.keyQ) {
-        _closeDailyClaim();
-        return true;
-      }
-      return false;
     }
     if (_panel == _Panel.login) {
       // Login panel: [c] copy URL, [Esc] close (and stop server).
@@ -621,6 +704,16 @@ class AppState extends State<AgroutApp> {
   // ── Daily claim ────────────────────────────────────────────────────
   bool get _dailyEnabled => _config.config.dailyClaim.enabled;
 
+  /// The header badge shows when daily claim is enabled AND the active key
+  /// has not recorded a claim for today. This is a reminder, not a strict
+  /// server-side check; the dialog performs the real verification.
+  bool get _dailyBadgeVisible {
+    if (!_dailyEnabled) return false;
+    final profile = _activeProfile;
+    if (profile == null) return false;
+    return !_config.config.dailyClaim.claimedToday(profile.id);
+  }
+
   /// Open the daily-claim dialog and run a fresh status check. Shown on
   /// [Shift+Q] from the main page.
   void _openDailyClaim() {
@@ -687,6 +780,178 @@ class AppState extends State<AgroutApp> {
     setState(() {});
   }
 
+  // ── Daily claim: browser automation flow ───────────────────────────
+
+  /// Entry point for `[a]` (auto claim). Drives the install -> browser ->
+  /// mode -> run state machine. Reuses the stored browser config when present.
+  void _startClaimFlow() {
+    final cfg = _config.config.dailyClaim;
+    if (cfg.browser != null && cfg.profileDir != null) {
+      // Already configured: head straight to the mode picker.
+      _dailyStep = _DailyStep.modeSelect;
+      setState(() {});
+      return;
+    }
+    if (_playwrightReady) {
+      _pickBrowser();
+    } else {
+      _dailyStep = _DailyStep.installConfirm;
+      setState(() {});
+    }
+  }
+
+  bool get _playwrightReady => Directory('${configDir()}${Platform.pathSeparator}playwright')
+      .existsSync();
+
+  /// Show the browser picker (all detected browsers), or fall back to a
+  /// status message when none are installed.
+  void _pickBrowser() {
+    _detectedBrowsers = BrowserRegistry.detect();
+    if (_detectedBrowsers.isEmpty) {
+      _dailyResult = ClaimCheckResult.unknown(
+          'no supported browser installed (need Brave/Chrome/Chromium/Edge)');
+      _setStatus('No supported browser detected; use [c] + manual claim', duration: 5);
+      _dailyStep = _DailyStep.status;
+      setState(() {});
+      return;
+    }
+    _browserIndex = _detectedBrowsers.indexWhere((b) => b.id == _config.config.dailyClaim.browser)
+            .clamp(0, _detectedBrowsers.length - 1);
+    _dailyStep = _DailyStep.browserSelect;
+    setState(() {});
+  }
+
+  /// [y] on the install prompt: lazily prepare the Playwright runtime, then
+  /// go to the browser picker.
+  void _runInstall() {
+    _dailyStep = _DailyStep.running;
+    _claimRunning = true;
+    _claimProgress = 'Installing Playwright runtime (one-time)...';
+    setState(() {});
+    unawaited(() async {
+      try {
+        await PlaywrightBootstrap.ensure(
+            onProgress: (m) => _setClaimProgress(m));
+        Directory('${configDir()}${Platform.pathSeparator}playwright')
+            .createSync(recursive: true);
+        _claimRunning = false;
+        if (mounted) {
+          _pickBrowser();
+          setState(() {});
+        }
+      } catch (e) {
+        _claimRunning = false;
+        _dailyStep = _DailyStep.status;
+        _dailyResult = ClaimCheckResult.unknown('install failed: $e');
+        if (mounted) setState(() {});
+      }
+    }());
+  }
+
+  /// Enter on the browser picker: persist the choice + a dedicated profile
+  /// dir, then ask for surface/background mode.
+  void _acceptBrowser() {
+    final b = _browserIndex < _detectedBrowsers.length
+        ? _detectedBrowsers[_browserIndex]
+        : null;
+    if (b == null) return;
+    final cfg = _config.config.dailyClaim;
+    cfg.browser = b.id;
+    cfg.profileDir = '${configDir()}${Platform.pathSeparator}browser';
+    _config.save();
+    LogStore.info('Daily claim: using browser ${b.id} (${b.dataDir})');
+    _dailyStep = _DailyStep.modeSelect;
+    setState(() {});
+  }
+
+  void _setClaimProgress(String m) {
+    _claimProgress = m;
+    if (mounted) setState(() {});
+  }
+
+  /// Actually run the claim with the chosen browser + mode.
+  Future<void> _runClaim() async {
+    final cfg = _config.config.dailyClaim;
+    final profile = _activeProfile;
+    DetectedBrowser? browser;
+    for (final b in BrowserRegistry.detect()) {
+      if (b.id == cfg.browser) {
+        browser = b;
+        break;
+      }
+    }
+    if (profile == null) {
+      _dailyResult = ClaimCheckResult.unknown('no active API key');
+      _dailyStep = _DailyStep.status;
+      setState(() {});
+      return;
+    }
+    final exe = browser?.binaryPath;
+    if (!cfg.isConfigured || exe == null) {
+      _dailyResult = ClaimCheckResult.unknown(
+          'browser ${cfg.browser} not found; pick again');
+      _dailyStep = _DailyStep.status;
+      setState(() {});
+      return;
+    }
+    _dailyStep = _DailyStep.running;
+    _claimRunning = true;
+    _claimProgress = 'Opening ${browser!.displayName}...';
+    setState(() {});
+
+    _quotaBefore = 0;
+    try {
+      final sub =
+          await AgentRouterClient().fetchBillingSubscription(apiKey: profile.apiKey);
+      _quotaBefore = (sub['hard_limit_usd'] as num?)?.toDouble() ?? 0;
+    } catch (_) {}
+
+    final engine = DailyClaimBrowser(cfg);
+    DailyClaimAttempt attempt;
+    try {
+      attempt = await engine.claim(
+        executablePath: exe,
+        surface: _claimSurface,
+        onProgress: _setClaimProgress,
+      );
+    } catch (e) {
+      _claimRunning = false;
+      _dailyStep = _DailyStep.status;
+      _dailyResult = ClaimCheckResult.unknown('claim failed: $e');
+      if (mounted) setState(() {});
+      return;
+    }
+    _claimRunning = false;
+    _lastAttempt = attempt;
+
+    if (attempt.success) {
+      cfg.markClaimed(profile.id);
+      _config.save();
+      LogStore.info(
+          'Daily claim: success for ${profile.name} (session captured)');
+      // Try to confirm via the activity log with the fresh session.
+      try {
+        final detector = DailyClaimDetector(
+            dailyClaimFetch(BridgedDailyClaimClient(AgentRouterClient())),
+            cfg);
+        final verified = await detector.check(
+          credentialId: profile.id,
+          apiKey: profile.apiKey,
+          sessionCookie: attempt.sessionCookie,
+          newApiUserId: attempt.newApiUserId,
+        );
+        _dailyResult = verified;
+      } catch (_) {
+        _dailyResult = ClaimCheckResult.confirmed('browser claim succeeded');
+      }
+    } else {
+      _dailyResult = ClaimCheckResult.unknown(
+          'claim ran but no session cookie found (${attempt.message})');
+    }
+    _dailyStep = _DailyStep.done;
+    if (mounted) setState(() {});
+  }
+
   Profile? get _activeProfile =>
       _config.config.activeProfileId == null
           ? null
@@ -698,32 +963,29 @@ class AppState extends State<AgroutApp> {
     final resolved = _dailyResult;
     final profile = _activeProfile;
 
-    String statusText;
-    Color statusColor;
-    if (_dailyChecking) {
-      statusText = 'Checking AgentRouter...';
-      statusColor = const Color(0xFFD0D0D0);
-    } else if (_dailyPendingConfirm) {
-      statusText = 'Had a claim today? [Shift+Y] yes  [N] no';
-      statusColor = const Color(0xFFFFD75E);
-    } else if (resolved == null) {
-      statusText = 'No check yet';
-      statusColor = const Color(0xFFD0D0D0);
-    } else if (resolved.isConfirmed) {
-      statusText = 'Claimed today: ${resolved.detail}';
-      statusColor = const Color(0xFF7FE0A0);
-    } else if (resolved.isNotClaimed) {
-      statusText = 'Not claimed today yet: ${resolved.detail}';
-      statusColor = blue;
-    } else {
-      statusText = 'Unknown: ${resolved.detail}';
-      statusColor = const Color(0xFFFF8A8A);
-    }
-
-    return Center(child: Container(
-      padding: const EdgeInsets.all(3),
-      decoration: BoxDecoration(border: BoxBorder.all(color: blue)),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
+    Component buildStatus() {
+      String statusText;
+      Color statusColor;
+      if (_dailyChecking) {
+        statusText = 'Checking AgentRouter...';
+        statusColor = const Color(0xFFD0D0D0);
+      } else if (_dailyPendingConfirm) {
+        statusText = 'Had a claim today? [Shift+Y] yes  [N] no';
+        statusColor = const Color(0xFFFFD75E);
+      } else if (resolved == null) {
+        statusText = 'No check yet';
+        statusColor = const Color(0xFFD0D0D0);
+      } else if (resolved.isConfirmed) {
+        statusText = 'Claimed today: ${resolved.detail}';
+        statusColor = const Color(0xFF7FE0A0);
+      } else if (resolved.isNotClaimed) {
+        statusText = 'Not claimed today yet: ${resolved.detail}';
+        statusColor = blue;
+      } else {
+        statusText = 'Unknown: ${resolved.detail}';
+        statusColor = const Color(0xFFFF8A8A);
+      }
+      return Column(mainAxisSize: MainAxisSize.min, children: [
         Text('Claim your daily!', style: TextStyle(fontWeight: FontWeight.bold, color: blue)),
         const SizedBox(height: 1),
         Text('Window: \$${cfg.expectedAmount.toStringAsFixed(cfg.expectedAmount % 1 == 0 ? 0 : 2)} '
@@ -739,10 +1001,117 @@ class AppState extends State<AgroutApp> {
               style: TextStyle(color: Color(0xFFD0D0D0))),
         ],
         const SizedBox(height: 1),
-        Text('[c] copy agentrouter login URL   [r] re-check   '
+        Text('[c] copy login URL   [a] auto claim   [r] re-check   '
             '[Shift+Y] mark done   [Esc] close',
             style: const TextStyle(color: Color(0xFFD0D0D0))),
-      ]),
+        const SizedBox(height: 1),
+        const Text('Auto claim uses your own browser via Playwright; '
+            'nothing is shared outside this machine.',
+            style: TextStyle(color: Color(0xFF8A8A8A))),
+      ]);
+    }
+
+    Component buildInstall() {
+      return Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text('Browser automation needs a one-time setup.',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 1),
+        Text(PlaywrightBootstrap.describeDownload()),
+        const SizedBox(height: 1),
+        const Text('Driver + bundled Node (~50-80 MB) are downloaded once; '
+            'your browser binary is reused.',
+            style: TextStyle(color: Color(0xFFD0D0D0))),
+        const SizedBox(height: 1),
+        const Text('[y] install   [n] back', style: TextStyle(color: Color(0xFF8A8A8A))),
+      ]);
+    }
+
+    Component buildBrowserSelect() {
+      final rows = <Component>[];
+      for (var i = 0; i < _detectedBrowsers.length; i++) {
+        final b = _detectedBrowsers[i];
+        rows.add(Text(
+          '${i == _browserIndex ? '>' : ' '} ${b.displayName} '
+          '${i == _browserIndex ? '(selected)' : ''}',
+          style: i == _browserIndex
+              ? const TextStyle(color: Color(0xFF7FE0A0))
+              : null,
+        ));
+      }
+      return Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('Pick the browser you use to log in to AgentRouter.',
+            style: TextStyle(fontWeight: FontWeight.bold, color: blue)),
+        const SizedBox(height: 1),
+        Text('Detected: ${_detectedBrowsers.length}'),
+        const SizedBox(height: 1),
+        ...rows,
+        const SizedBox(height: 1),
+        const Text('A dedicated automation profile will be created under the '
+            'bridge config dir; your daily browser is not touched.',
+            style: TextStyle(color: Color(0xFF8A8A8A))),
+        const SizedBox(height: 1),
+        const Text('[up/down] move   [Enter] confirm   [Esc] back',
+            style: TextStyle(color: Color(0xFF8A8A8A))),
+      ]);
+    }
+
+    Component buildModeSelect() {
+      return Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('Run the claim in the background or watch it?',
+            style: TextStyle(fontWeight: FontWeight.bold, color: blue)),
+        const SizedBox(height: 1),
+        const Text('[b] background (headless, no window)', style: TextStyle(color: Color(0xFFD0D0D0))),
+        const Text('[s] surface (browser opens so you can watch / finish 2FA or GitHub login)',
+            style: TextStyle(color: Color(0xFFD0D0D0))),
+        const SizedBox(height: 1),
+        const Text('[Esc] back', style: TextStyle(color: Color(0xFF8A8A8A))),
+      ]);
+    }
+
+    Component buildRunning() {
+      return Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('Claiming your daily${_claimRunning ? '...' : ''}',
+            style: TextStyle(fontWeight: FontWeight.bold, color: blue)),
+        const SizedBox(height: 1),
+        Text(_claimProgress, style: const TextStyle(color: Color(0xFFD0D0D0))),
+      ]);
+    }
+
+    Component buildDone() {
+      final a = _lastAttempt;
+      final detail = _dailyResult?.detail ?? '';
+      return Column(mainAxisSize: MainAxisSize.min, children: [
+        Text(a?.success == true ? 'Daily claim done!' : 'Daily claim did not complete.',
+            style: TextStyle(fontWeight: FontWeight.bold,
+                color: a?.success == true ? const Color(0xFF7FE0A0) : const Color(0xFFFF8A8A))),
+        const SizedBox(height: 1),
+        Text(detail, style: const TextStyle(color: Color(0xFFD0D0D0))),
+        if (a?.success == true && _quotaBefore > 0) ...[
+          const SizedBox(height: 1),
+          Text('Billing hard limit before: \$${_quotaBefore.toStringAsFixed(2)}',
+              style: const TextStyle(color: Color(0xFFD0D0D0))),
+        ],
+        if (a?.sessionCookie != null) ...[
+          const SizedBox(height: 1),
+          const Text('Session cookie captured for future automated checks.',
+              style: TextStyle(color: Color(0xFF8A8A8A))),
+        ],
+        const SizedBox(height: 1),
+        const Text('[Esc] close', style: TextStyle(color: Color(0xFF8A8A8A))),
+      ]);
+    }
+
+    return Center(child: Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(border: BoxBorder.all(color: blue)),
+      child: switch (_dailyStep) {
+        _DailyStep.status => buildStatus(),
+        _DailyStep.installConfirm => buildInstall(),
+        _DailyStep.browserSelect => buildBrowserSelect(),
+        _DailyStep.modeSelect => buildModeSelect(),
+        _DailyStep.running => buildRunning(),
+        _DailyStep.done => buildDone(),
+      },
     ));
   }
 
@@ -824,6 +1193,16 @@ class AppState extends State<AgroutApp> {
               'Update Available! $_updateTag',
               style: const TextStyle(
                 color: Color(0xFFFFD75E), // bright amber, distinct from the muted palette
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+          if (_dailyBadgeVisible) ...[
+            Text('   ', style: const TextStyle(color: Colors.grey)),
+            Text(
+              'Claim your daily!',
+              style: const TextStyle(
+                color: Color(0xFF64B5F6), // bright blue, matches the daily dialog
                 fontWeight: FontWeight.bold,
               ),
             ),

@@ -22,9 +22,14 @@
   - `DailyClaimBrowser`: drives the installed browser with a dedicated bridge
     profile (`~/.config/agrout-bridge/browser`), clicking "Continue with
     GitHub" and capturing the session cookie after the OAuth round trip.
-  - TUI: `[Shift+Q]` opens the daily-claim dialog (status check via the
-    detector, `[c]` copy login URL, `[Shift+Y]` mark done, `[Esc]` back).
-    Browser automation wiring lands in a follow-up.
+  - TUI: `[Shift+Q]` opens the daily-claim dialog. The dialog is a state
+    machine: status check (`[c]` copy login URL, `[Shift+Y]` mark done,
+    `[r]` re-check) -> `[a]` auto claim -> one-time Playwright install prompt
+    -> browser picker (only installed browsers) -> surface/background mode ->
+    running progress -> done (with session cookie + billing-before readout).
+    The `Claim your daily!` header badge appears beside the update badge
+    while the active key has no claim recorded for today. Browser automation
+    wiring lands in a follow-up.
 
 ## v0.1.21 (2026-08-16)
 
