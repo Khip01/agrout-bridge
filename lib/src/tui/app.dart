@@ -686,17 +686,11 @@ class AppState extends State<AgroutApp> {
     _loadingBilling = true;
     try {
       final client = AgentRouterClient();
-      final today = DateTime.now();
-      final start = DateTime(today.year, today.month, today.day - 30);
-      String fmt(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
-          '${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+      // Subscription only: the OpenAI-style usage endpoint returns a single
+      // total that is identical for any date range and key, so it does not
+      // reflect real consumption and is not surfaced in the TUI.
       final sub = await client.fetchBillingSubscription(apiKey: p.apiKey);
-      final usage = await client.fetchBillingUsage(
-        apiKey: p.apiKey,
-        startDate: fmt(start),
-        endDate: fmt(today),
-      );
-      _billing = {'subscription': sub, 'usage': usage};
+      _billing = {'subscription': sub};
     } catch (e) {
       _billing = null;
       _setStatus('Billing fetch failed: $e', duration: 3);
@@ -860,7 +854,6 @@ class AppState extends State<AgroutApp> {
         _section('Billing (via API key)'),
         _kv('Soft limit (quota)', _fmtLimit(_billing!['subscription']?['soft_limit_usd'])),
         _kv('Hard limit', _fmtLimit(_billing!['subscription']?['hard_limit_usd'])),
-        _kv('Used (last 30d)', _fmtUsed(_billing!['usage']?['total_usage'])),
       ] else if (_loadingBilling)
         Text('Fetching billing...', style: TextStyle(color: Colors.grey)),
       _section('Profiles (up/down select, Enter switch)'),
@@ -917,11 +910,6 @@ class AppState extends State<AgroutApp> {
     return '${_months[d.month - 1]} ${d.day}, ${d.year} at $hh:$mm:$ss';
   }
 
-  String _fmtUsed(dynamic v) {
-    if (v is! num) return '-';
-    return '\$${v.toStringAsFixed(4)}';
-  }
-
   List<Component> _usageRows() {
     final u = UsageStore();
     final m = u.perModel;
@@ -936,14 +924,11 @@ class AppState extends State<AgroutApp> {
       _section('Tokens (cumulative)'),
       _kv('Input', '${u.inputTokens}'),
       _kv('Output', '${u.outputTokens}'),
-      _kv('Cache read', '${u.cacheReadTokens}'),
-      _kv('Cache creation', '${u.cacheCreationTokens}'),
-      _kv('Cost (CNY)', u.costCny.toStringAsFixed(4)),
       _section('Per-model breakdown'),
       if (m.isEmpty) Text('No requests yet.', style: TextStyle(color: Colors.grey)),
       ...m.map((stat) => Padding(
             padding: const EdgeInsets.symmetric(vertical: 0),
-            child: Text('${stat.model.padRight(28)} n=${stat.count} ok=${stat.successCount} in=${stat.inputTokens} out=${stat.outputTokens} cost=${stat.costCny.toStringAsFixed(4)}', style: const TextStyle(color: Colors.grey)),
+            child: Text('${stat.model.padRight(28)} n=${stat.count} ok=${stat.successCount} in=${stat.inputTokens} out=${stat.outputTokens}', style: const TextStyle(color: Colors.grey)),
           )),
     ];
   }

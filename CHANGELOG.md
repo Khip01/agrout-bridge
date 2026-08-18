@@ -4,6 +4,16 @@
 
 ### Fix
 
+- **Drop misleading usage/cost rows from the TUI.** Three rows showed values
+  that did not reflect real usage: `Used (last 30d)` came from the
+  OpenAI-style usage endpoint, which returns the same `total_usage` for any
+  date range and key (not a 30-day figure and not the dashboard
+  `Consumption`); `Cache read` / `Cache creation` were always 0 because
+  AgentRouter does not emit those fields; and `Cost (CNY)` was only parsed
+  from non-streaming billing blocks, so streaming requests always reported
+  0. The Profile billing section now fetches and shows subscription limits
+  only, and the Usage page shows requests + input/output tokens. The
+  per-model breakdown keeps request and token counts.
 - **Port-saving dialog states that the change applies after restart.** Saving
   a port used to close the dialog immediately even though the running server
   only picks up the new port on the next launch, which looked like the switch
