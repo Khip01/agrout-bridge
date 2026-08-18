@@ -3,6 +3,8 @@
 AgentRouter bridge for OpenCode, Claude Desktop, Cursor, and any
 OpenAI-/Anthropic-compatible client.
 
+<img width="1897" height="925" alt="image" src="https://github.com/user-attachments/assets/aefd6b03-ae1f-47eb-925c-85839e27eb87" />
+
 Local HTTP proxy that forwards client requests to `https://agentrouter.org`
 while adding the Claude Code client fingerprint the upstream gate expects.
 Manages the WAF session cookie (`acw_tc`) per profile and survives restarts.
