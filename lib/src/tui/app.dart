@@ -93,6 +93,10 @@ class AppState extends State<AgroutApp> {
   int? _portAttempt; // port currently running a test (shows "testing port X")
   bool _portScanDone = false;
   final Map<int, bool> _portStatus = {};
+  /// Port saved via [Enter] but not yet active: it applies after restart.
+  /// When non-null the port dialog stays open and shows a yellow note instead
+  /// of closing, so the user sees the change is pending, not instant.
+  int? _portPendingSave;
 
   String? _loginUrl;
   Timer? _loginExpiry;
@@ -720,7 +724,14 @@ class AppState extends State<AgroutApp> {
 
   // ── Header ────────────────────────────────────────────────────────
   Component _buildHeader() {
-    final port = _config.config.serverPort;
+    final configured = _config.config.serverPort;
+    final running = _proxy.status().port;
+    // Only show the "after restart" hint while the user has a saved-but-not-
+    // yet-applied change this session. A mere running/configured mismatch
+    // (startup auto-increment, stale process, etc.) is NOT a pending change.
+    final port = _portPendingSave != null && running != configured
+        ? '$running (after restart: $configured)'
+        : '$running';
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 1),
       child: Row(
@@ -908,7 +919,7 @@ class AppState extends State<AgroutApp> {
 
   String _fmtUsed(dynamic v) {
     if (v is! num) return '-';
-    return v.toStringAsFixed(4);
+    return '\$${v.toStringAsFixed(4)}';
   }
 
   List<Component> _usageRows() {
@@ -1022,9 +1033,13 @@ class AppState extends State<AgroutApp> {
   List<Component> _proxyRows() {
     final s = _proxy.status();
     final cookies = s.wafCookies.keys.toList();
+    final configured = _config.config.serverPort;
+    final listen = _portPendingSave != null && s.port != configured
+        ? '${s.listenAddress}:${s.port} (after bridge restart: $configured)'
+        : '${s.listenAddress}:${s.port}';
     return [
       _section('Server'),
-      _kv('Listen', '${s.listenAddress}:${s.port}'),
+      _kv('Listen', listen),
       _kv('Running', s.running ? 'yes' : 'no'),
       _kv('Active streams', '${s.activeStreams}'),
       _kv('Uptime (s)', '${DateTime.now().difference(s.startedAt).inSeconds}'),
@@ -1632,13 +1647,16 @@ class AppState extends State<AgroutApp> {
       return;
     }
     final p = _portTested!;
+    // Persist the new port to config, but stay in the dialog: the change only
+    // takes effect after a bridge restart, and the note below makes that
+    // explicit instead of pretending the running server switched instantly.
     _config.config.serverPort = p;
     _config.save();
-    _panel = _Panel.main;
-    _startPageRefresh();
+    _portPendingSave = p;
+    _portState = _PortState.success;
     setState(() {});
-    _setStatus('Port set to $p', duration: 3);
-    LogStore.info('Port set to $p');
+    LogStore.info('Port set to $p (applies after restart)');
+    _setStatus('Port $p saved, applies after restart', duration: 5);
   }
 
   /// Intercept port-field keys: [t] test, Enter save, Esc back. Typing still
@@ -1683,7 +1701,8 @@ class AppState extends State<AgroutApp> {
       statusText = 'Scan: $s';
       statusColor = Colors.grey;
     } else {
-      statusText = 'Scanning...';
+      // statusText = 'Ready to test port ${_portAttempt ?? _parsedPort()}';
+      statusText = 'Waiting user to test the port...';
       statusColor = Colors.grey;
     }
 
@@ -1695,7 +1714,7 @@ class AppState extends State<AgroutApp> {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           const Text('Port configuration', style: TextStyle(color: Colors.cyan, fontWeight: FontWeight.bold)),
           const SizedBox(height: 1),
-          Text('Current: ${_config.config.serverPort}   Enter new port (empty = reset to ${AppConfig.defaultPort})'),
+          Text('Current: ${_portLabel()}   Enter new port'),
         const SizedBox(height: 1),
         SizedBox(
           width: 24,
@@ -1720,9 +1739,36 @@ class AppState extends State<AgroutApp> {
         ),
         const SizedBox(height: 1),
         Text(statusText, style: TextStyle(color: statusColor)),
+        if (_portPendingSave != null) ...[
+          const SizedBox(height: 1),
+          // Yellow italic note: the new port is saved to config but the running
+          // server does not switch until the bridge restarts.
+          Text(
+            'Port $_portPendingSave saved: it will be applied on the next bridge restart.',
+            style: const TextStyle(
+              color: Color(0xFFFFB347),
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
       ]),
       ),
     ));
+  }
+
+  /// Human label for the port actually in use. Always shows the running port
+  /// (what the listener is bound to) so the dialog matches the header and the
+  /// Proxy Listen line. Only when the user has a saved-but-not-yet-applied
+  /// change this session is the "after bridge restart" wording added; a
+  /// running/configured mismatch without a pending save (startup
+  /// auto-increment, stale process) shows the running port alone.
+  String _portLabel() {
+    final configured = _config.config.serverPort;
+    final running = _proxy.status().port;
+    if (_portPendingSave != null && running != configured) {
+      return '$running (after bridge restart: $configured)';
+    }
+    return '$running';
   }
 
   // ── Login panel (local sign-in URL) ───────────────────────────────
@@ -1987,5 +2033,3 @@ Color urlColor;
      ));
   }
  }
-
-

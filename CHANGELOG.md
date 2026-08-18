@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Fix
+
+- **Port-saving dialog states that the change applies after restart.** Saving
+  a port used to close the dialog immediately even though the running server
+  only picks up the new port on the next launch, which looked like the switch
+  was instant (and made the old port test "in use" because the bridge itself
+  still held it). Now `[Enter]` persists the port and keeps the dialog open
+  with a yellow italic note: "Port N saved: it will be applied on the next
+  bridge restart." The "after restart" wording appears ONLY while the saved
+  change is pending this session; after a restart there is nothing pending, so
+  no hint is shown. The dialog `Current:` label always shows the running port
+  (matching the header and the Proxy `Listen` line) so the three displays can
+  never disagree.
+
 ## v0.1.22 (2026-08-17)
 
 ### Feat
