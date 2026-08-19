@@ -29,25 +29,41 @@ secrets stored here.
 - This is simpler than AgentRouter: no GitHub OAuth authorize-URL trick. A
   username/password login can feed the daily-claim dialog directly.
 
-## Models (probed, 2026-08-18, sk- key)
+## Models (probed twice, 2026-08-18/19, sk- key)
 
-Stable:
-- `auto` -> routes to a healthy channel (echoed `agnes-2.5-flash`), works on
-  both `/v1/chat/completions` and `/v1/messages` (Anthropic path returns real
+The provider is LOAD-SENSITIVE, not permanently broken. Probe round 1 hit a
+`system_cpu_overloaded` (99.3%) moment and almost everything failed; probe
+rounds 2-3, minutes later, most named models answered. Results vary run to
+run for the same model.
+
+Works (at least once, HTTP 200):
+- `auto` -> routes to a healthy channel (echoed `agnes-2.5-flash`); also
+  works on `/v1/messages` (Anthropic path returns real
   `cache_read_input_tokens`, `billing_usage.source: oai_chat`).
+- `DeepSeek-V4-Pro` (echoed `nvidia/nemotron-3-ultra-550b-a55b` -> routed)
+- `glm-5.2` (echoed `z-ai/glm-5.2`)
+- `kat-coder-pro-v2.5`
+- `Kimi-K2.6` (echoed `thinkingmachines/inkling` -> routed)
+- `sensenova-6.7-flash-lite`
+- `step-3.7-flash`, `step-explore`, `step-router-v1`
 
-Unstable (timeout / SSL 525 / 522 / CPU overload at the time of probing):
-- `DeepSeek-V4-Flash`, `DeepSeek-V4-Pro`, `glm-5.2`, `kat-coder-pro-v2.5`,
-  `Kimi-K2.6`, `MiniMax-M3`, `Qwen3.6-27B`, `Qwen3.8-27B`,
-  `sensenova-6.7-flash-lite`, `sensenova-u1-fast`, `step-3.7-flash`,
-  `step-explore`, `step-router-v1`.
+Flaky / failed at probe time:
+- `DeepSeek-V4-Flash` (timeouts)
+- `MiniMax-M3` (429)
+- `Qwen3.6-27B` (503), `Qwen3.8-27B` (400)
+- `sensenova-u1-fast` (404)
 
 Notes:
-- Echo `model` in responses can differ from the requested id (server-side
-  routing; e.g. `Qwen3.8-27B` request echoed `meta/muse-glimmer-30b`).
+- Echo `model` can differ from the requested id (server-side routing; round 1
+  `Qwen3.8-27B` echoed `meta/muse-glimmer-30b`, later `DeepSeek-V4-Pro` echoed
+  `nvidia/...` and `Kimi-K2.6` echoed `thinkingmachines/inkling`). Treat the
+  model list as aliases, not a guarantee of the actual backend.
 - `/v1/models` `data[].supported_endpoint_types` is per-model.
 - Responses include large `reasoning_content` (DeepSeek-style) on some
   models; the bridge already strips/translates this for AgentRouter.
+- For agentic work, stability under load matters: `auto` is the most reliable
+  fallback; `step-*`, `glm-5.2`, `sensenova-6.7-flash-lite`, `Kimi-K2.6` were
+  responsive when probed.
 
 ## Billing
 
@@ -63,7 +79,8 @@ Notes:
    reliable "already claimed" sensor? (needs a real session; no creds yet)
 2. Daily reward amount (frontend string exists; amount itself needs a live
    session).
-3. Which models are actually stable long-term (provider is load-sensitive).
+3. Which models are actually stable long-term (provider is load-sensitive;
+   `auto` is the most reliable, named models come and go with load).
 4. GitHub Action-based checkin exists (`tj5332888/hcnsec-checkin`:
    `signin.yml` cron daily + `signin.py`), and a general New API multi-site
    tool `lengxii/new-api-checkin` (HTTP / CDP / Camoufox, PoW+Turnstile
