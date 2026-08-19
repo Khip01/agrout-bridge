@@ -71,7 +71,7 @@ agrout-bridge/
 │       │   ├── api_client.dart     # AgentRouter HTTP (New API endpoints)
 │       │   ├── login.dart          # Local sign-in server (paste API key, validate /v1/models)
 │       │   ├── daily_claim.dart    # Daily-claim OAuth URL builder + default-browser opener
-│       │   ├── usage_store.dart    # Aggregated usage + cost from response billing
+│       │   ├── stats_store.dart    # Persistent per-day usage + cost (stats.jsonl, 30-day retention)
 │       │   ├── log_store.dart      # JSONL activity log
 │       │   └── updater.dart        # Self-update: latest.json (raw first, CDN fallback) + Tags API fallback, download .tgz + npm install -g
 │       ├── server/
@@ -363,7 +363,7 @@ and `/health`.
 | Key | Page | Data |
 |-----|------|------|
 | `1` | Profile | Active profile, API key (masked), added date, billing, WAF state |
-| `2` | Usage & Cost | Token + cost aggregates from response billing |
+| `2` | Usage & Cost | Today's requests + tokens + per-model breakdown, saved previous days |
 | `3` | Models | Live model list + per-model health |
 | `4` | Proxy Config | Port, endpoints, uptime, circuit, active streams |
 
@@ -395,6 +395,18 @@ counts + duration come from `ProxyOutcome`); open endpoints are logged inline in
 The status bar's left slot is a single indicator: `Proxy stopped` (red),
 `Streaming (N)` (yellow), a transient status message, or `Proxy ready` (green).
 The right side shows uptime plus the time since the last model refresh.
+
+## Usage stats
+
+`StatsStore` persists per-request usage grouped by calendar day to
+`~/.config/agrout-bridge/stats.jsonl` (one JSON line per day, max 30 days,
+oldest pruned on every write). It is initialised in `main.dart` before the
+server starts and re-inits in the TUI (idempotent). This file is a separate
+source from `logs.jsonl` and is NEVER touched by the log clear actions; only
+the Usage page clear keymap operates on it. The Usage & Cost page shows the
+current day's totals + per-model breakdown and a compact summary of the
+retained previous days. `Shift+C` (clear all) and `Shift+O` (clear before
+today) are page-scoped to the Usage page and ask for Y/N confirmation.
 
 ## Versioning
 
@@ -439,8 +451,10 @@ with `package.json` when bumping a release.
 | `Enter` | Daily claim (URL) | Mark today's claim done and close the dialog |
 | `Ctrl+L` | Main | Toggle log side panel |
 | `f` | Log open | Toggle log fullscreen / side panel |
-| `Shift+C` | Log open | Clear all log entries (Y/N confirmation) |
-| `Shift+O` | Log open | Clear entries before today (Y/N confirmation) |
+| `Ctrl+Shift+C` | Log open | Clear all log entries (Y/N confirmation) |
+| `Ctrl+Shift+O` | Log open | Clear entries before today (Y/N confirmation) |
+| `Shift+C` | Usage page | Clear all usage stats (Y/N confirmation) |
+| `Shift+O` | Usage page | Clear usage stats before today (Y/N confirmation) |
 | `y` / `n` | Clear confirm | Confirm / cancel the pending clear |
 
 ## Changelog

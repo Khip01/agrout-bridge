@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Feat
+
+- **Usage stats are now persistent and grouped per day.** The Usage & Cost
+  page no longer reads a volatile in-memory counter that reset on every
+  restart. A new `StatsStore` writes one JSON line per calendar day to
+  `~/.config/agrout-bridge/stats.jsonl` (max 30 days, oldest pruned on
+  write), so per-model breakdown and token totals survive bridge restarts
+  and are fully independent of the user-clearable activity log. The page
+  shows today's totals plus a compact summary of the kept previous days.
+- **Usage page clear keymap.** On the Usage & Cost page only, `[Shift+C]`
+  clears all usage stats and `[Shift+O]` clears stats before today, both
+  with a Y/N confirmation banner inline on the page. These never touch
+  `logs.jsonl`.
+- **Log clear keymap moved to Ctrl+Shift.** The log side panel's clear keys
+  moved from `[Shift+C]` / `[Shift+O]` to `[Ctrl+Shift+C]` (clear all) and
+  `[Ctrl+Shift+O]` (clear before today), freeing the plain-Shift combos for
+  the Usage page while keeping the two clears visually distinct.
+
 ## v0.1.23 (2026-08-18)
 
 ### Fix

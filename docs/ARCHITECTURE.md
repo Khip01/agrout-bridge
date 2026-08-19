@@ -28,7 +28,7 @@ agrout-bridge/
 │       │   ├── waf.dart            # WAF cookie jar (parse, merge, serialize, classify)
 │       │   ├── api_client.dart     # AgentRouter HTTP client (models, chat, messages, billing)
 │       │   ├── login.dart          # Local sign-in server (paste API key, validate /v1/models)
-│       │   ├── usage_store.dart    # Aggregated usage + cost from response billing
+│       │   ├── stats_store.dart    # Persistent per-day usage stats (stats.jsonl, 30-day retention)
 │       │   ├── log_store.dart      # JSONL activity log (2000 entries)
 │       │   └── updater.dart        # Self-update: latest.json CDN + Tags API fallback, download .tgz + npm install -g
 │       ├── server/
@@ -56,7 +56,7 @@ agrout-bridge/
 │   ├── waf_test.dart
 │   ├── sse_test.dart
 │   ├── circuit_test.dart
-│   └── usage_store_test.dart
+│   └── stats_store_test.dart
 ├── AGENTS.md
 ├── CHANGELOG.md
 ├── README.md
@@ -81,7 +81,7 @@ Upstream ──> 200 text/event-stream    <──  │
                                            ├─ circuit.recordSuccess / Failure
                                            ├─ modelHealth.recordFailure (5xx)
                                            ├─ pumpSse for SSE; buffered copy otherwise
-                                           └─ record usage + cost into UsageStore
+                                           └─ record usage + cost into StatsStore (per-day)
 Client  <──  200 (or 4xx / 5xx)       <──
 ```
 

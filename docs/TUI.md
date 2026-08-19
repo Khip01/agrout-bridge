@@ -28,7 +28,7 @@ log is a sidebar, fullscreen log when toggled.
 | Key | Page | Data |
 |-----|------|------|
 | `1` | Profile | Active profile, key (masked), key-added date, billing quota/usage (via API key), selectable profile list |
-| `2` | Usage & Cost | Total / success / streamed request counts, success rate, tokens (in/out/cache), cumulative cost, per-model breakdown |
+| `2` | Usage & Cost | Today's request counts, tokens, per-model breakdown; plus summary of saved previous days (persistent per-day stats, 30-day retention) |
 | `3` | Models | Live model list. Press `Enter` on a model to copy its id. |
 | `4` | Proxy Config | Port, listen address, uptime, active streams, circuit state, WAF cookie entries, model health failures |
 
@@ -56,11 +56,22 @@ log is a sidebar, fullscreen log when toggled.
 | Key | Action |
 |-----|--------|
 | `f` | Toggle log fullscreen / sidebar |
-| `Shift+C` | Clear all log entries (Y/N confirm via status bar) |
-| `Shift+O` | Clear entries before today |
+| `Ctrl+Shift+C` | Clear all log entries (Y/N confirm via status bar) |
+| `Ctrl+Shift+O` | Clear entries before today |
 
-The log header spells out the keys: `[f] fullscreen`, `[Shift+C] clear
-all`, `[Shift+O] clear old only`.
+The log header spells out the keys: `[f] fullscreen`, `[Ctrl+Shift+C] clear
+all`, `[Ctrl+Shift+O] clear old only`.
+
+## Usage page clear (page `2` only)
+
+| Key | Action |
+|-----|--------|
+| `Shift+C` | Clear all usage stats (Y/N confirm inline on the page) |
+| `Shift+O` | Clear usage stats before today |
+
+These operate on the persistent per-day `stats.jsonl` (page `2` footer shows
+`[Shift+C] clear all stats` and `[Shift+O] clear old stats`) and never touch
+`logs.jsonl`.
 
 ## Daily claim
 

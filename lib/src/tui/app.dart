@@ -9,8 +9,8 @@ import '../services/api_client.dart';
 import '../services/daily_claim.dart';
 import '../services/login.dart';
 import '../services/log_store.dart';
+import '../services/stats_store.dart';
 import '../services/updater.dart';
-import '../services/usage_store.dart';
 import '../server/server_controller.dart';
 import 'clipboard.dart';
 
@@ -47,6 +47,9 @@ enum _InfoPage { profile, usage, models, proxy }
 /// Which clear action is awaiting Y/N confirmation in the log panel.
 enum _ClearScope { none, all, beforeToday }
 
+/// Which usage-stats clear action is awaiting Y/N confirmation.
+enum _StatsClearScope { none, all, beforeToday }
+
 /// Login-screen lifecycle used to color-code the sign-in dialog.
 /// Mirrors a tiny state machine:
 ///   idle   → waiting for the user to paste/confirm a key (URL is bright,
@@ -74,6 +77,7 @@ class AppState extends State<AgroutApp> {
   bool _showLog = false;
   bool _logFullscreen = false;
   _ClearScope _confirmClear = _ClearScope.none;
+  _StatsClearScope _confirmStatsClear = _StatsClearScope.none;
   String _status = '';
   Timer? _statusTimer;
   Timer? _pageRefreshTimer;
@@ -122,7 +126,7 @@ class AppState extends State<AgroutApp> {
   final _logScrollCtrl = ScrollController();
   int _lastLogVersion = -1;
   int _lastModelVersion = -1;
-  int _lastUsageVersion = 0; // UsageStore.version advances on every record()
+  int _lastUsageVersion = 0; // StatsStore.version advances on every record()
   DateTime? _lastRefreshAt; // last foreground refresh timestamp
 
   /// Latest stable tag from GitHub, when newer than [bridgeVersion].
@@ -134,6 +138,7 @@ class AppState extends State<AgroutApp> {
   void initState() {
     super.initState();
     LogStore.init();
+    StatsStore.init();
     LogStore.info('agrout-bridge starting...');
     _startPageRefresh();
     unawaited(_refreshBilling());
@@ -169,7 +174,7 @@ class AppState extends State<AgroutApp> {
           _lastModelVersion = _proxy.modelCacheVersion;
           contentChanged = true;
         }
-        final usageVersion = UsageStore().version;
+        final usageVersion = StatsStore().version;
         if (_infoPage == _InfoPage.usage && _lastUsageVersion != usageVersion) {
           _lastUsageVersion = usageVersion;
           contentChanged = true;
@@ -374,8 +379,9 @@ class AppState extends State<AgroutApp> {
     }
     if (_showLog) {
       // Log-specific keys take priority over the main panel keymap so that
-      // Shift+C / Shift+O are not swallowed by the daily-claim / endpoint keys.
-      // Pending clear confirmation takes priority over every other log key.
+      // Ctrl+Shift+C / Ctrl+Shift+O are not swallowed by the daily-claim /
+      // endpoint keys. Pending clear confirmation takes priority over any
+      // other log key.
       if (_confirmClear != _ClearScope.none) {
         if (e.logicalKey == LogicalKey.keyY || e.logicalKey == LogicalKey.enter) {
           _doConfirmClear();
@@ -388,7 +394,7 @@ class AppState extends State<AgroutApp> {
         return false;
       }
       if (e.logicalKey == LogicalKey.keyF) { _logFullscreen = !_logFullscreen; setState(() {}); return true; }
-      if (e.logicalKey == LogicalKey.keyC && e.isShiftPressed) {
+      if (e.logicalKey == LogicalKey.keyC && e.isControlPressed && e.isShiftPressed) {
         if (LogStore.entries.isEmpty) {
           _setStatus('Log is already empty', duration: 3);
           return true;
@@ -398,7 +404,7 @@ class AppState extends State<AgroutApp> {
         setState(() {});
         return true;
       }
-      if (e.logicalKey == LogicalKey.keyO && e.isShiftPressed) {
+      if (e.logicalKey == LogicalKey.keyO && e.isControlPressed && e.isShiftPressed) {
         final n = LogStore.countBeforeToday();
         if (n == 0) {
           _setStatus('No entries older than today', duration: 3);
@@ -406,6 +412,43 @@ class AppState extends State<AgroutApp> {
         }
         _confirmClear = _ClearScope.beforeToday;
         _setStatus('Clear $n entries before today? [Y]es [N]o', duration: 0);
+        setState(() {});
+        return true;
+      }
+    }
+    // Usage page clears its own daily stats (Shift+O / Shift+C), independent
+    // of the activity log. Keyed before the main panel map so Shift+C and
+    // Shift+O are not captured by the daily-claim / copy-endpoint keys.
+    if (_infoPage == _InfoPage.usage) {
+      if (_confirmStatsClear != _StatsClearScope.none) {
+        if (e.logicalKey == LogicalKey.keyY || e.logicalKey == LogicalKey.enter) {
+          _doConfirmStatsClear();
+          return true;
+        }
+        if (e.logicalKey == LogicalKey.keyN || e.logicalKey == LogicalKey.escape) {
+          _cancelConfirmStatsClear();
+          return true;
+        }
+        return false;
+      }
+      if (e.logicalKey == LogicalKey.keyC && e.isShiftPressed && !e.isControlPressed) {
+        if (StatsStore().days.isEmpty) {
+          _setStatus('No usage stats yet', duration: 3);
+          return true;
+        }
+        _confirmStatsClear = _StatsClearScope.all;
+        _setStatus('Clear ALL usage stats? [Y]es [N]o', duration: 0);
+        setState(() {});
+        return true;
+      }
+      if (e.logicalKey == LogicalKey.keyO && e.isShiftPressed && !e.isControlPressed) {
+        final n = StatsStore().countBeforeToday();
+        if (n == 0) {
+          _setStatus('No stats before today', duration: 3);
+          return true;
+        }
+        _confirmStatsClear = _StatsClearScope.beforeToday;
+        _setStatus('Clear $n day(s) of usage stats before today? [Y]es [N]o', duration: 0);
         setState(() {});
         return true;
       }
@@ -911,27 +954,58 @@ class AppState extends State<AgroutApp> {
   }
 
   List<Component> _usageRows() {
-    final u = UsageStore();
-    final m = u.perModel;
-    return [
-      _section('Requests'),
-      _kv('Total', '${u.totalRequests}'),
-      _kv('Successful', '${u.successRequests}'),
-      _kv('Streamed', '${u.streamRequests}'),
-      _kv('Success rate', '${(u.successRate * 100).toStringAsFixed(1)}%'),
-      _kv('Last model', u.lastModel ?? '-'),
-      _kv('Last request', u.lastRequestAt?.toIso8601String().substring(0, 19) ?? '-'),
-      _section('Tokens (cumulative)'),
-      _kv('Input', '${u.inputTokens}'),
-      _kv('Output', '${u.outputTokens}'),
-      _section('Per-model breakdown'),
+    final s = StatsStore();
+    final today = s.today;
+    final m = today?.perModel ?? const <ModelStats>[];
+    final rows = <Component>[
+      if (_confirmStatsClear != _StatsClearScope.none)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 0),
+          child: Row(children: [
+            Text(
+              _confirmStatsClear == _StatsClearScope.all
+                  ? ' Clear ALL usage stats? '
+                  : ' Clear stats before today? ',
+              style: const TextStyle(color: Color(0xFFFFB347), fontWeight: FontWeight.bold),
+            ),
+            _key(_footerHues['action']!, '[Y]', 'es  '),
+            _key(_footerHues['danger']!, '[N]', 'o'),
+          ]),
+        ),
+      _section('Requests (today)'),
+      _kv('Total', '${today?.totalRequests ?? 0}'),
+      _kv('Successful', '${today?.successRequests ?? 0}'),
+      _kv('Streamed', '${today?.streamRequests ?? 0}'),
+      _kv('Success rate', today == null ? '-' : '${(today.successRate * 100).toStringAsFixed(1)}%'),
+      _kv('Last model', today?.lastModel ?? '-'),
+      _kv('Last request', today?.lastRequestAt?.toIso8601String().substring(0, 19) ?? '-'),
+      _section('Tokens (today)'),
+      _kv('Input', '${today?.inputTokens ?? 0}'),
+      _kv('Output', '${today?.outputTokens ?? 0}'),
+      _section('Per-model breakdown (today)'),
       if (m.isEmpty) Text('No requests yet.', style: TextStyle(color: Colors.grey)),
       ...m.map((stat) => Padding(
             padding: const EdgeInsets.symmetric(vertical: 0),
             child: Text('${stat.model.padRight(28)} n=${stat.count} ok=${stat.successCount} in=${stat.inputTokens} out=${stat.outputTokens}', style: const TextStyle(color: Colors.grey)),
           )),
     ];
+    final nowDay = DateTime.now();
+    final todayKey = _fmtDay(nowDay);
+    final recent = s.days.where((d) => _fmtDay(d.day) != todayKey).toList();
+    if (recent.isNotEmpty) {
+      rows.add(_section('Previous days (${s.days.length} kept, max ${StatsStore.retentionDays})'));
+      for (final d in recent) {
+        rows.add(Padding(
+          padding: const EdgeInsets.symmetric(vertical: 0),
+          child: Text('${_fmtDay(d.day).padRight(12)} n=${d.totalRequests} ok=${d.successRequests} in=${d.inputTokens} out=${d.outputTokens}', style: const TextStyle(color: Colors.grey)),
+        ));
+      }
+    }
+    return rows;
   }
+
+  String _fmtDay(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   List<Component> _modelHeaderRows() {
     final n = _proxy.modelIds.length;
@@ -1269,6 +1343,11 @@ class AppState extends State<AgroutApp> {
           _key(page, '[Enter] ', 'copy id'),
         ];
       case _InfoPage.usage:
+        return [
+          Text('  |  ', style: base),
+          _key(page, '[Shift+C] ', 'clear all stats  '),
+          _key(page, '[Shift+O] ', 'clear old stats'),
+        ];
       case _InfoPage.proxy:
         return const [];
     }
@@ -1301,6 +1380,31 @@ class AppState extends State<AgroutApp> {
     setState(() {});
   }
 
+  void _doConfirmStatsClear() {
+    switch (_confirmStatsClear) {
+      case _StatsClearScope.beforeToday:
+        final n = StatsStore().countBeforeToday();
+        StatsStore().clearBeforeToday();
+        _setStatus('Cleared $n day(s) of stats before today', duration: 3);
+        break;
+      case _StatsClearScope.all:
+        StatsStore().clearAll();
+        _setStatus('Cleared all usage stats', duration: 3);
+        break;
+      case _StatsClearScope.none:
+        break;
+    }
+    _confirmStatsClear = _StatsClearScope.none;
+    _lastUsageVersion = StatsStore().version;
+    setState(() {});
+  }
+
+  void _cancelConfirmStatsClear() {
+    _confirmStatsClear = _StatsClearScope.none;
+    _setStatus('Stats clear cancelled', duration: 2);
+    setState(() {});
+  }
+
   Component _logPanel({required bool fullscreen}) {
     final entries = LogStore.latestFirst.take(200).toList();
     _lastLogVersion = LogStore.version;
@@ -1325,8 +1429,8 @@ class AppState extends State<AgroutApp> {
         Text(fullscreen ? ' LOG (fullscreen)' : ' LOG', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF9C8FFF))),
         const Spacer(),
         if (!fullscreen) _key(_footerHues['ctrl']!, '[f]', ' fullscreen  '),
-        _key(_footerHues['ctrl']!, '[Shift+C]', ' clear all  '),
-        _key(_footerHues['ctrl']!, '[Shift+O]', ' clear old only'),
+        _key(_footerHues['ctrl']!, '[Ctrl+Shift+C]', ' clear all  '),
+        _key(_footerHues['ctrl']!, '[Ctrl+Shift+O]', ' clear old only'),
       ]),
       Container(height: 1, color: Colors.grey),
       if (_confirmClear != _ClearScope.none)
@@ -1438,8 +1542,12 @@ class AppState extends State<AgroutApp> {
     add('Log controls:', Colors.cyan);
     add('  [Ctrl+L]  Toggle log side panel');
     add('  [f]       Toggle log fullscreen / sidebar');
-    add('  [Shift+C] Clear all log entries (asks Y/N)');
-    add('  [Shift+O] Clear entries before today (asks Y/N)');
+    add('  [Ctrl+Shift+C] Clear all log entries (asks Y/N)');
+    add('  [Ctrl+Shift+O] Clear entries before today (asks Y/N)');
+    add('');
+    add('Usage page ([2]) only:', Colors.cyan);
+    add('  [Shift+C] Clear all usage stats (asks Y/N)');
+    add('  [Shift+O] Clear stats before today (asks Y/N)');
     add('');
     add('Other:', Colors.cyan);
     add('  [p]  Port configuration panel');

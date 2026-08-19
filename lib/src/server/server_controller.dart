@@ -22,7 +22,7 @@ import '../models/profile.dart';
 import '../models/version.dart';
 import '../services/api_client.dart';
 import '../services/log_store.dart';
-import '../services/usage_store.dart';
+import '../services/stats_store.dart';
 import '../services/waf.dart';
 import 'circuit.dart';
 import 'proxy.dart';
@@ -379,7 +379,7 @@ class ServerController {
           profiles.upsert(profile.copyWith(wafCookies: merged));
         },
         onOutcome: (o) {
-          UsageStore().record(o);
+          StatsStore().record(o);
           // Rich per-request log line:
           //   [ts] PROXY <code> (<bytes/stream>) model=<m> in=<i> out=<o> <dur>ms
           final fmt = o.streaming ? 'stream' : '${o.inputTokens + o.outputTokens} tokens';

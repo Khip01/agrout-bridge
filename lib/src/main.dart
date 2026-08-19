@@ -8,6 +8,7 @@ import 'models/version.dart';
 import 'services/api_client.dart';
 import 'services/login.dart';
 import 'services/log_store.dart';
+import 'services/stats_store.dart';
 import 'services/updater.dart';
 import 'server/server_controller.dart';
 import 'tui/app.dart';
@@ -112,6 +113,7 @@ Future<void> _runCommand(List<String> args) async {
   // mode records requests too. TUI mode re-inits in `AppState.initState`,
   // which is idempotent (reloads the same file).
   LogStore.init();
+  StatsStore.init();
   final controller = ServerController(profiles: profiles, configStore: config);
   final boundPort = await controller.start();
 

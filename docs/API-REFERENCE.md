@@ -100,11 +100,16 @@ client socket open indefinitely.
 
 ## Usage & cost capture
 
-Every proxied request contributes to the in-memory `UsageStore`:
+Every proxied request contributes to the persistent per-day `StatsStore`
+(`~/.config/agrout-bridge/stats.jsonl`, one line per calendar day, max 30
+days retained):
 
 - Tokens (input / output / cache_read / cache_creation) parsed from
   both non-stream responses and accumulated across stream deltas.
 - `cost_cny` parsed from Anthropic's non-stream `billing.request.cost_cny.total`.
 
-The aggregate is visible on the TUI Usage & Cost page (page 2) and
-persists until the bridge is restarted.
+The data is visible on the TUI Usage & Cost page (page 2): today's totals +
+per-model breakdown, plus a summary of the kept previous days. It survives
+bridge restarts and is independent of the user-clearable activity log. The
+page-scoped `[Shift+C]` (clear all) and `[Shift+O]` (clear before today)
+actions clear them with Y/N confirmation.
