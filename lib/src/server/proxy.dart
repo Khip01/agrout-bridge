@@ -378,6 +378,19 @@ final _base64DataUriRegex = RegExp(r'data:[^,]{1,128};base64,[A-Za-z0-9+/=]+');
 /// request far below the measured ~2.2k aggregate trigger.
 final _longBase64RunRegex = RegExp(r'[A-Za-z0-9+/]{200,}={0,2}');
 
+/// Shorter base64 runs (>= 32 chars). Individually innocent, but many of them
+/// in a single request accumulate into an encoded-blob payload that trips the
+/// upstream filter (e.g. a PDF page rendered as several <200-char data URIs).
+/// Only applied when the request-wide aggregate is already above
+/// [_base64AggregateScrubChars]; a lone short run is left untouched so
+/// normal prose (URLs, ids) is never mangled.
+final _shortBase64RunRegex = RegExp(r'[A-Za-z0-9+/]{32,}={0,2}');
+
+/// Safety margin below the measured ~2.2k gate: once the total base64-ish
+/// payload in a request reaches this many chars we aggressively scrub short
+/// runs too, keeping the forwarded body comfortably under the limit.
+const int _base64AggregateScrubChars = 1400;
+
 /// Google Docs element IDs, e.g. `kix.kuawx1xiz6sv`. These leak into the
 /// conversation whenever the agent discusses document structure. A single
 /// `kix.` token of ~13 chars reads as encoded/obfuscated content to the
@@ -391,10 +404,13 @@ const _kixElementIdPlaceholder = '[kix element id stripped by bridge]';
 
 const _base64Placeholder = '[base64 data stripped by bridge]';
 
-String _scrubBase64String(String input) {
+String _scrubBase64String(String input, {bool aggressive = false}) {
   var out = input;
   out = out.replaceAll(_base64DataUriRegex, _base64Placeholder);
   out = out.replaceAll(_longBase64RunRegex, _base64Placeholder);
+  if (aggressive) {
+    out = out.replaceAll(_shortBase64RunRegex, _base64Placeholder);
+  }
   out = out.replaceAll(_kixElementIdRegex, _kixElementIdPlaceholder);
   return out;
 }
@@ -410,22 +426,63 @@ bool _isImageContentBlock(Map value) {
   return false;
 }
 
-dynamic _scrubBase64Value(dynamic value) {
-  if (value is String) return _scrubBase64String(value);
+dynamic _scrubBase64Value(dynamic value, {bool aggressive = false}) {
+  if (value is String) return _scrubBase64String(value, aggressive: aggressive);
   if (value is List) {
     for (var i = 0; i < value.length; i++) {
-      value[i] = _scrubBase64Value(value[i]);
+      value[i] = _scrubBase64Value(value[i], aggressive: aggressive);
     }
     return value;
   }
   if (value is Map) {
     if (_isImageContentBlock(value)) return value;
     for (final k in value.keys.toList()) {
-      value[k] = _scrubBase64Value(value[k]);
+      value[k] = _scrubBase64Value(value[k], aggressive: aggressive);
     }
     return value;
   }
   return value;
+}
+
+/// The whole payload after `;base64,` inside a data URI. Used by the
+/// aggregate counter so short data URIs contribute their real payload size.
+final _base64DataUriPayloadRegex = RegExp(r'base64,([A-Za-z0-9+/=]+)');
+
+/// Total number of base64-ish characters across the request, excluding
+/// multimodal image content blocks (which must stay intact). This mirrors the
+/// upstream filter's cumulative view and lets us decide whether to scrub short
+/// runs too (see [_base64AggregateScrubChars]).
+int _countBase64Payload(Map<String, dynamic> body) {
+  var total = 0;
+  void walk(dynamic value) {
+    if (value is String) {
+      final stripped = value.replaceAll(_base64DataUriRegex, '');
+      for (final m in _shortBase64RunRegex.allMatches(stripped)) {
+        total += m.group(0)!.length;
+      }
+      for (final m in _base64DataUriPayloadRegex.allMatches(value)) {
+        total += m.group(1)!.length;
+      }
+      return;
+    }
+    if (value is List) {
+      for (final v in value) {
+        walk(v);
+      }
+      return;
+    }
+    if (value is Map) {
+      if (_isImageContentBlock(value)) return;
+      for (final v in value.values) {
+        walk(v);
+      }
+    }
+  }
+
+  for (final v in body.values) {
+    walk(v);
+  }
+  return total;
 }
 
 /// Remove encoded content (base64 blobs and Google Docs `kix.` element IDs)
@@ -441,8 +498,14 @@ dynamic _scrubBase64Value(dynamic value) {
 /// are preserved untouched so real uploaded reference images reach the model.
 bool scrubBase64Payload(Map<String, dynamic> body) {
   final before = jsonEncode(body);
+  // A single request full of short base64 runs (e.g. a PDF paged into many
+  // <200-char data URIs) accumulates past the upstream trigger even though no
+  // single run is long enough to scrub on its own. Measure the whole payload
+  // first; when it is large, downgrade the short-run threshold too.
+  final aggregate = _countBase64Payload(body);
+  final aggressive = aggregate >= _base64AggregateScrubChars;
   for (final k in body.keys.toList()) {
-    body[k] = _scrubBase64Value(body[k]);
+    body[k] = _scrubBase64Value(body[k], aggressive: aggressive);
   }
   return jsonEncode(body) != before;
 }

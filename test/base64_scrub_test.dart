@@ -141,6 +141,61 @@ void main() {
       expect(content, contains('[base64 data stripped by bridge]'));
     });
 
+    test('aggressively scrubs many short bare runs that aggregate past the gate', () {
+      // No single run is long enough to trip the >=200 scrub alone, but the
+      // request-wide total of ~2600 chars exceeds the upstream trigger (and
+      // our 1400-char safety margin), so the short runs must be scrubbed too.
+      final runs = List.generate(20, (_) => 'ABCDEFGH${_b64Run(70)}XYZ');
+      final body = {
+        'messages': [
+          {'role': 'user', 'content': 'pdf pages here: ${runs.join(' ')} and tail'},
+        ],
+      };
+      final changed = scrubBase64Payload(body);
+      expect(changed, isTrue);
+      final content = (body['messages'] as List).first['content'] as String;
+      expect(content, isNot(contains('ABCDEFGH')));
+      expect(content, contains('pdf pages here:'));
+      expect(content, contains('and tail'));
+    });
+
+    test('leaves lone short base64 runs untouched below the aggregate gate', () {
+      // One ~100-char run is far below the 1400-char aggregate gate, so it
+      // must NOT be scrubbed (preserves IDs/tokens in normal prose).
+      final body = {
+        'messages': [
+          {'role': 'user', 'content': 'token: abCD\$A${_b64Run(90)}Z9 and done'},
+        ],
+      };
+      final before = jsonEncode(body);
+      final changed = scrubBase64Payload(body);
+      expect(changed, isFalse);
+      expect(jsonEncode(body), before);
+    });
+
+    test('image content blocks are not counted toward the aggregate gate', () {
+      // A legit reference image is preserved AND must not push the request
+      // into aggressive mode by itself.
+      final body = {
+        'messages': [
+          {
+            'role': 'user',
+            'content': [
+              {
+                'type': 'image_url',
+                'image_url': {'url': 'data:image/png;base64,${_b64Run(4000)}'},
+              },
+              {'type': 'text', 'text': 'satu gambar, tanpa teks lain'},
+            ],
+          },
+        ],
+      };
+      final before = jsonEncode(body);
+      final changed = scrubBase64Payload(body);
+      expect(changed, isFalse);
+      expect(jsonEncode(body), before);
+    });
+
     test('walks nested Anthropic content blocks', () {
       final body = {
         'system': 'you are a helper',

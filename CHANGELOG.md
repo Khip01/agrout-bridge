@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Fix
+
+- **Short base64 runs are scrubbed when the request-wide payload is large.**
+  A single request full of short base64 runs (for example a PDF paged into
+  many <200-char data URIs) accumulates past agentrouter.org's encoded-
+  content trigger even though no run is long enough to scrub on its own.
+  `scrubBase64Payload` now measures the request-wide base64 payload first
+  and, when it reaches a 1400-char safety margin, lowers the run threshold
+  so short runs are scrubbed too. A lone short run and real image content
+  blocks stay untouched.
+
 ### Feat
 
 - **Usage stats are now persistent and grouped per day.** The Usage & Cost
