@@ -25,7 +25,12 @@ TUI for daemon / Docker usage.
 - 429/QPS-aware retry with exponential backoff
 - Content-blocked mitigation: strips base64 data URIs / `kix.` element IDs
   from text before forwarding so large OpenCode/Claude Code sessions pass the
-  upstream filter (preserves real uploaded images)
+  upstream filter (preserves real uploaded images), including aggregate
+  short-run base64 payloads (e.g. paged PDFs)
+- Daily claim dialog (`[c]`): copies/opens the daily AgentRouter login link
+  (GitHub / LinuxDO)
+- Persistent per-day usage stats (`stats.jsonl`, 30-day retention) with
+  page-scoped clear keymap on the Usage & Cost page
 
 ## Install
 

@@ -77,6 +77,15 @@ and bare base64 runs (>= 200 chars) with a short placeholder. Plain text,
 URLs and tool-call arguments are left untouched. The scrub runs for both the
 OpenAI and Anthropic paths.
 
+Since v0.1.24 the scrub also handles the *aggregate* short-run case: a
+request full of many <200-char base64 runs (for example a PDF paged into
+multiple data URIs) can cross the ~2.2k trigger even though no single run is
+scrubbable on its own. The scrub first measures the whole request's base64
+payload (excluding image content blocks) and, once it reaches a 1400-char
+safety margin, lowers the run threshold so short runs are scrubbed too. A
+lone short run in an otherwise clean request is left untouched so normal
+prose, IDs and tokens are never mangled.
+
 **Image content blocks are preserved.** Since v0.1.13 the scrub detects
 multimodal image parts (OpenAI `image_url` content block, Anthropic `image`
 content block with a `source` map) and leaves their data URI / base64 data
