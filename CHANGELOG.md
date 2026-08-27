@@ -13,6 +13,21 @@
   auto-route today; the caller still has to pick the right path. The
   end of the file captures the deferred auto-routing + response-shape
   conversion plan so it is not lost.
+- **Naming convention: `/An` and `/Op` suffix.** Each model entry in
+  `opencode.jsonc` carries a short suffix on its display `name` to
+  make the path assignment visible in the OpenCode model picker.
+  `/An` = served from the Anthropic path (`/v1/messages`);
+  `/Op` = served from the OpenAI path (`/v1/chat/completions`). The
+  model *id* (the key under `provider.X.models`) stays the raw name;
+  only the display `name` gets the suffix. Recommendation table and
+  example blocks in `docs/MODEL-ENDPOINTS.md` use the suffix.
+- **`glm-5.3` recommendation changed from `openai` to `anthropic`.**
+  The OpenAI path returned intermittent 400 / 500 / `sensitive_words`
+  responses during real sessions (bridge log excerpt recorded in
+  `docs/MODEL-ENDPOINTS.md` `glm-5.3` caveat). Anthropic path has
+  been stable in 3-shot probes. Example Anthropic block in the doc
+  now includes `glm-5.3 /An`; the OpenAI example block no longer
+  lists it.
 
 ## v0.1.24 (2026-08-20)
 

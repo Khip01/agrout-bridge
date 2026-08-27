@@ -11,6 +11,26 @@ auto-routing with response-shape conversion (see *Roadmap* below).
 > are part of the bridge's default install. New models need a fresh
 > probe before they can be added to the recommendation table.
 
+### Naming convention: `/An` and `/Op` suffix
+
+To make the path assignment visible in the OpenCode model picker, every
+model entry in `opencode.jsonc` carries a short suffix on its display
+`name`:
+
+- **`/An`** — served from the Anthropic path (`/v1/messages`). Use for
+  the Claude family and any model the probe showed was more reliable
+  on that path, in particular `glm-5.3` (moved here on 2026-08-28
+  after the OpenAI path returned repeated 400 / `sensitive_words`).
+- **`/Op`** — served from the OpenAI path (`/v1/chat/completions`). Use
+  for the rest, in particular `gpt-5.6-sol` and `deepseek-v4-flash`.
+
+The model *id* (the key under `provider.X.models`) stays the raw model
+name (`claude-opus-5`, `glm-5.3`, …) — only the display `name` gets the
+suffix. The suffix is purely a UI label; the bridge does not look at
+it. The actual routing is decided by which provider block the model
+sits under (Anthropic vs OpenAI), and that block's `npm` field is what
+tells the OpenCode SDK which path to use.
+
 ## Why this matters
 
 The bridge forwards client requests to AgentRouter along two HTTP paths
@@ -59,22 +79,23 @@ back to the panel signal alone and is marked **panel-only**.
 
 ## Recommendation table
 
-| Model              | `supported_endpoint_types` (panel) | Anthropic path probe (3-shot)         | OpenAI path probe (3-shot)              | Recommendation |
-| ------------------ | ----------------------------------- | ------------------------------------- | -------------------------------------- | -------------- |
-| `gpt-5.6-sol`      | `openai`                            | 402 (budget)                          | 402 (budget)                           | **openai** (panel-only — only one path accepted by upstream) |
-| `claude-opus-4-8`  | `anthropic`, `openai`               | 402 (budget)                          | 402 (budget)                           | **anthropic** (panel-only — Claude family canonical home) |
-| `claude-opus-5`    | `anthropic`, `openai`               | 402 (budget)                          | 402 (budget)                           | **anthropic** (panel-only — Claude family canonical home) |
-| `deepseek-v4-flash` | `openai`, `anthropic`              | 3/3 200 OK, ~1435 ms avg              | 3/3 200 OK, ~1252 ms avg               | **openai** (faster, stable on both) |
-| `glm-5.3`          | `anthropic`, `openai`               | 3/3 200 OK, ~2123 ms avg              | 3/3 200 OK, ~1450 ms avg               | **openai** (faster — see *caveat* below) |
+| Model              | `supported_endpoint_types` (panel) | Anthropic path probe (3-shot)         | OpenAI path probe (3-shot)              | Recommendation | Display name (suffix)       |
+| ------------------ | ----------------------------------- | ------------------------------------- | -------------------------------------- | -------------- | ---------------------------- |
+| `gpt-5.6-sol`      | `openai`                            | 402 (budget)                          | 402 (budget)                           | **openai** (panel-only — only one path accepted by upstream) | `AgentRouter - GPT 5.6 SOL /Op` |
+| `claude-opus-4-8`  | `anthropic`, `openai`               | 402 (budget)                          | 402 (budget)                           | **anthropic** (panel-only — Claude family canonical home) | `AgentRouter - Claude Opus 4.8 /An` |
+| `claude-opus-5`    | `anthropic`, `openai`               | 402 (budget)                          | 402 (budget)                           | **anthropic** (panel-only — Claude family canonical home) | `AgentRouter - Claude Opus 5 /An` |
+| `deepseek-v4-flash` | `openai`, `anthropic`              | 3/3 200 OK, ~1435 ms avg              | 3/3 200 OK, ~1252 ms avg               | **openai** (faster, stable on both) | `AgentRouter - DeepSeek V4 Flash /Op` |
+| `glm-5.3`          | `anthropic`, `openai`               | 3/3 200 OK, ~2123 ms avg              | 3/3 200 OK, ~1450 ms avg               | **anthropic** (stable — moved off `openai` after intermittent 400 / `sensitive_words_detected`; see *caveat* below) | `AgentRouter - GLM 5.3 /An` |
 
 ### `glm-5.3` caveat
 
-On 2026-08-28 between 03:57 and 04:10 local time, the OpenAI path for
-`glm-5.3` returned several 400 / 500 / `sensitive_words_detected`
-responses for sessions using the default OpenCode system prompt
-(roughly 8.5 KB of English boilerplate). The 3-shot probe at 21:08 the
-same day showed the OpenAI path returning 200 every time. The bridge
-log excerpt:
+The recommendation for `glm-5.3` was **changed from `openai` to
+`anthropic`** on 2026-08-28 after the OpenAI path kept returning
+intermittent 400 / 500 / `sensitive_words_detected` responses during
+real sessions. The Anthropic path (`/v1/messages`) has been stable in
+3-shot probe every time it was tested.
+
+Bridge log excerpt of the OpenAI-path flakiness:
 
 ```
 2026-08-28T03:57:03  PROXY 400 (stream) model=glm-5.3 in=0 out=0 3.001s
@@ -84,15 +105,21 @@ log excerpt:
 2026-08-28T04:08:54  PROXY 200 (204 tokens)  model=glm-5.3 in=26 out=178 3.924s
 2026-08-28T04:08:55  PROXY 500 (0 tokens)    model=glm-5.3 in=0 out=0 60ms
 2026-08-28T04:09:33  PROXY 200 (189 tokens)  model=glm-5.3 in=25 out=164 4.011s
+2026-08-28T06:02:16  PROXY 400 (stream) model=glm-5.3 in=0 out=0 6.160s
+2026-08-28T06:03:43  PROXY 400 (stream) model=glm-5.3 in=0 out=0 4.103s
 ```
 
-The 400s at 03:57–04:01 used the OpenAI path; the 200s at 04:08–04:09
-include both paths. The bridge itself does not change behaviour
-between the two windows — the upstream just stopped returning 400 on
-that path. If a `Bad Request` shows up again, the workaround is to
-move the model to a provider block that uses `npm: @ai-sdk/anthropic`
-on the same `baseURL` (the bridge forwards correctly on the
-`/v1/messages` path).
+Between 06:00 and 07:59 the OpenAI path was 9 successes out of 11
+attempts (~18% failure rate) for `glm-5.3`, and the body of every 400
+came back as `Content-Length: 0` from upstream (OpenCode renders that
+generic as `Bad Request`). The payload sent by the client was
+identical between the successful and failed requests in the same
+session, so the trigger is upstream-side, not the client.
+
+If `glm-5.3` on the Anthropic path also starts failing, revert the
+move (drop the `glm-5.3` block from the Anthropic provider) and
+re-probe both paths; the recommendation in the table at the top of
+this file is the single source of truth.
 
 ### `claude-opus-*` panel-only notes
 
@@ -111,7 +138,7 @@ differ in the `npm` field, which selects the OpenCode SDK and therefore
 the path the client uses to reach the bridge. Place both under
 `provider` in `opencode.jsonc` and assign models by name.
 
-### Anthropic-compatible block (use for `claude-opus-*`, optional `glm-5.3` fallback)
+### Anthropic-compatible block (use for `claude-opus-*` and `glm-5.3`)
 
 ```jsonc
 "Khip01 - AgentRouter (Anthropic)": {
@@ -123,7 +150,7 @@ the path the client uses to reach the bridge. Place both under
   },
   "models": {
     "claude-opus-5": {
-      "name": "AgentRouter - Claude Opus 5",
+      "name": "AgentRouter - Claude Opus 5 /An",
       "attachment": true, "tool_call": true,
       "temperature": true, "reasoning": true,
       "limit":   { "context": 900000, "input": 900000, "output": 8192 },
@@ -131,18 +158,26 @@ the path the client uses to reach the bridge. Place both under
       "cost": { "input": 8, "output": 40 }
     },
     "claude-opus-4-8": {
-      "name": "AgentRouter - Claude Opus 4.8",
+      "name": "AgentRouter - Claude Opus 4.8 /An",
       "attachment": true, "tool_call": true,
       "temperature": true, "reasoning": true,
       "limit":   { "context": 900000, "input": 900000, "output": 8192 },
       "modalities": { "input": ["text","image"], "output": ["text"] },
       "cost": { "input": 8, "output": 40 }
+    },
+    "glm-5.3": {
+      "name": "AgentRouter - GLM 5.3 /An",
+      "attachment": true, "tool_call": true,
+      "temperature": true, "reasoning": true,
+      "limit":   { "context": 420000, "input": 420000, "output": 8192 },
+      "modalities": { "input": ["text","image"], "output": ["text"] },
+      "cost": { "input": 3, "output": 12 }
     }
   }
 }
 ```
 
-### OpenAI-compatible block (use for `gpt-5.6-sol`, `deepseek-v4-flash`, `glm-5.3`)
+### OpenAI-compatible block (use for `gpt-5.6-sol`, `deepseek-v4-flash`)
 
 ```jsonc
 "Khip01 - AgentRouter (OpenAI)": {
@@ -154,7 +189,7 @@ the path the client uses to reach the bridge. Place both under
   },
   "models": {
     "gpt-5.6-sol": {
-      "name": "AgentRouter - GPT 5.6 SOL",
+      "name": "AgentRouter - GPT 5.6 SOL /Op",
       "attachment": true, "tool_call": true,
       "temperature": true, "reasoning": true,
       "limit":   { "context": 420000, "input": 420000, "output": 8192 },
@@ -162,19 +197,11 @@ the path the client uses to reach the bridge. Place both under
       "cost": { "input": 3, "output": 15 }
     },
     "deepseek-v4-flash": {
-      "name": "AgentRouter - DeepSeek V4 Flash",
+      "name": "AgentRouter - DeepSeek V4 Flash /Op",
       "temperature": true, "reasoning": true,
       "limit":   { "context": 420000, "input": 420000, "output": 8192 },
       "modalities": { "input": ["text"], "output": ["text"] },
       "cost": { "input": 2, "output": 6 }
-    },
-    "glm-5.3": {
-      "name": "AgentRouter - GLM 5.3",
-      "attachment": true, "tool_call": true,
-      "temperature": true, "reasoning": true,
-      "limit":   { "context": 420000, "input": 420000, "output": 8192 },
-      "modalities": { "input": ["text","image"], "output": ["text"] },
-      "cost": { "input": 3, "output": 12 }
     }
   }
 }
