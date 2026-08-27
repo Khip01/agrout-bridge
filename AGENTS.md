@@ -92,7 +92,9 @@ agrout-bridge/
 │   ├── INSTALL.md
 │   ├── API-REFERENCE.md
 │   ├── TUI.md
-│   └── ARCHITECTURE.md
+│   ├── ARCHITECTURE.md
+│   ├── CONTENT-FILTER.md
+│   └── MODEL-ENDPOINTS.md
 ├── test/
 ├── AGENTS.md
 ├── CHANGELOG.md
@@ -293,6 +295,16 @@ OpenCode (OpenAI compatible) configuration:
 Per-client configs for Claude Code, Cursor, Continue and other
 OpenAI-compatible tools live in `docs/INSTALL.md`. Measured ceilings and
 the methodology behind the numbers are in `docs/CONTENT-FILTER.md`.
+
+The bridge has two upstream paths — Anthropic Messages (`/v1/messages`)
+and OpenAI Chat Completions (`/v1/chat/completions`) — and **does not
+auto-route between them** today. Which of the two a model is best
+served from (Anthropic vs OpenAI) is documented in
+`docs/MODEL-ENDPOINTS.md` with the live probe data and operational
+log excerpts that justify each recommendation. If a model is added
+to one block in `opencode.jsonc` and the bridge's recommendation says
+the other block, the request will fail with `400` or
+`sensitive_words_detected`; the caller has to pick the right block.
 
 ## Handling upstream content-blocked
 

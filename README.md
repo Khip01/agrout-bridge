@@ -31,6 +31,10 @@ TUI for daemon / Docker usage.
   (GitHub / LinuxDO)
 - Persistent per-day usage stats (`stats.jsonl`, 30-day retention) with
   page-scoped clear keymap on the Usage & Cost page
+- Per-model upstream endpoint guide (`docs/MODEL-ENDPOINTS.md`): each
+  AgentRouter model routed to the right of `/v1/messages` (Anthropic)
+  vs `/v1/chat/completions` (OpenAI), with example `opencode.jsonc`
+  blocks for both `npm` flavours
 
 ## Install
 

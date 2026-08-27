@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Docs
+
+- **`docs/MODEL-ENDPOINTS.md` — per-model upstream endpoint guide.**
+  Documents which of the two upstream paths (`/v1/messages` Anthropic vs
+  `/v1/chat/completions` OpenAI) each AgentRouter model is best served
+  from, with the probe data behind each recommendation, the
+  operational log excerpts that surfaced the issue, and ready-to-paste
+  `opencode.jsonc` blocks for both `npm` flavours. The bridge does not
+  auto-route today; the caller still has to pick the right path. The
+  end of the file captures the deferred auto-routing + response-shape
+  conversion plan so it is not lost.
+
 ## v0.1.24 (2026-08-20)
 
 ### Fix
