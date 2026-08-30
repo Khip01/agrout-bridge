@@ -89,6 +89,38 @@ distort the agent's own context for no benefit.
   original message is forwarded as-is; a translator outage never
   blocks a proxied request.
 
+## Translation cache and parallelism
+
+The first revision of the translator called Google translate
+sequentially for every `user` message in the request body. A long
+session (hundreds of `user` turns) easily added 30-80 seconds of
+latency before the first upstream byte. v0.1.25 ships two
+mitigations:
+
+1. **In-memory LRU cache** (default capacity 2048, configurable via
+   the `Translator` constructor) keyed by `sha1(input text)`.
+   Identical text never hits Google twice. Because a session's history
+   `user` messages do not change between turns, the second and
+   subsequent requests for the same session are essentially free: the
+   first request populates the cache, and the rest are cache hits.
+2. **Parallel translate calls** in `translateUserMessagesInBody`. The
+   walker first collects every text that needs translation, then issues
+   them concurrently with `Future.wait`. The first-request latency is
+   now roughly one Google round-trip instead of N round-trips.
+
+The body-walker itself is not cache-aware (it only counts distinct
+texts that go to the translator). It is the `Translator` instance
+that holds the cache. The `server_controller` reuses one `Translator`
+per process, so the cache survives across requests in the same
+bridge run.
+
+If a session resets the bridge (e.g. user toggles translation off and
+on, or restarts the binary) the cache is empty and the next request
+re-translates. There is no on-disk persistence in v1: history `user`
+messages for the same session are usually stable, so an in-memory
+cache alone is enough to remove the per-request overhead within a
+single bridge run.
+
 ## Tuning and control
 
 The translator runs only when `config.translateUserMessages` is `true`

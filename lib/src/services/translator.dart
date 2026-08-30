@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:collection';
+
+import 'package:crypto/crypto.dart';
 
 /// Result of a single translate call.
 class TranslationResult {
@@ -85,23 +88,38 @@ bool isGatewaySupported(String detectedCode) =>
 /// are swallowed and reported as a non-translated passthrough so a translation
 /// outage never blocks a proxied request.
 class Translator {
-  Translator({HttpClient? client, Duration? timeout})
+  Translator({HttpClient? client, Duration? timeout, int? cacheCapacity})
       : _client = client ?? HttpClient(),
-        _timeout = timeout ?? const Duration(seconds: 8);
+        _timeout = timeout ?? const Duration(seconds: 8),
+        _cache = _LruCache(cacheCapacity ?? 2048);
 
   final HttpClient _client;
   final Duration _timeout;
+  final _LruCache _cache;
 
   static const _endpoint =
       'https://translate.googleapis.com/translate_a/single';
 
+  /// Number of entries currently in the cache (for tests / diagnostics).
+  int get cacheSize => _cache.length;
+
   /// Detect + translate [text] to English. Returns a passthrough result
   /// (`translated: false`, original text) on any failure or empty input.
+  /// Results are memoised: identical input never hits the network twice.
   Future<TranslationResult> toEnglish(String text) async {
     if (text.trim().isEmpty) {
       return TranslationResult(
           detectedLanguage: '', translatedText: text, translated: false);
     }
+    final key = _cacheKey(text);
+    final cached = _cache.get(key);
+    if (cached != null) return cached;
+    final fresh = await _fetch(text);
+    _cache.set(key, fresh);
+    return fresh;
+  }
+
+  Future<TranslationResult> _fetch(String text) async {
     try {
       final uri = Uri.parse(_endpoint).replace(queryParameters: {
         'client': 'gtx',
@@ -126,6 +144,11 @@ class Translator {
       return TranslationResult(
           detectedLanguage: '', translatedText: text, translated: false);
     }
+  }
+
+  String _cacheKey(String text) {
+    final digest = sha1.convert(utf8.encode(text));
+    return digest.toString();
   }
 
   /// Parse the `translate_a/single` response shape:
@@ -177,6 +200,33 @@ class Translator {
   }
 }
 
+/// Tiny LRU cache. Pure-Dart, no dependencies, used to memoize Google
+/// translate responses. Cache key is whatever the caller passes (the
+/// translator uses a SHA-1 of the input text). When [capacity] is reached
+/// the least-recently-used entry is evicted.
+class _LruCache {
+  _LruCache(this.capacity);
+  final int capacity;
+  final LinkedHashMap<String, TranslationResult> _map =
+      LinkedHashMap<String, TranslationResult>();
+  int get length => _map.length;
+
+  TranslationResult? get(String key) {
+    final v = _map.remove(key);
+    if (v != null) _map[key] = v; // mark as most-recent
+    return v;
+  }
+
+  void set(String key, TranslationResult value) {
+    if (_map.containsKey(key)) {
+      _map.remove(key);
+    } else if (_map.length >= capacity) {
+      _map.remove(_map.keys.first); // evict LRU
+    }
+    _map[key] = value;
+  }
+}
+
 /// Builds the flexible reply-language instruction appended to the last user
 /// message after translation. Keeps the model agentic (act, use tools, be
 /// concise) and pins the reply language to [originalLanguageCode] so the
@@ -213,38 +263,54 @@ Future<bool> translateUserMessagesInBody(
   final msgs = body['messages'];
   if (msgs is! List) return false;
 
-  var changed = false;
-  String? lastTranslatedLang; // original language of the last translated user msg
-  int? lastUserIndex;
-
+  // Phase 1: gather every (text, location) we need translated, in document
+  // order. The actual translate calls happen in parallel so the total wait
+  // is roughly one round-trip, not 61 round-trips for a 61-user-message
+  // session.
+  final pending = <_Pending>[];
   for (var i = 0; i < msgs.length; i++) {
     final m = msgs[i];
     if (m is! Map) continue;
     if (m['role'] != 'user') continue;
-    lastUserIndex = i;
-
     final content = m['content'];
     if (content is String) {
-      final res = await translate(content);
-      if (res.translated) {
-        m['content'] = res.translatedText;
-        changed = true;
-        lastTranslatedLang = res.detectedLanguage;
-      }
+      pending.add(_Pending(i, null, content));
     } else if (content is List) {
-      for (final part in content) {
-        if (part is! Map) continue;
-        // OpenAI: {type:'text', text:'...'}. Anthropic: {type:'text', text:'...'}.
-        if (part['type'] == 'text' && part['text'] is String) {
-          final res = await translate(part['text'] as String);
-          if (res.translated) {
-            part['text'] = res.translatedText;
-            changed = true;
-            lastTranslatedLang = res.detectedLanguage;
-          }
+      for (var p = 0; p < content.length; p++) {
+        final part = content[p];
+        if (part is Map && part['type'] == 'text' && part['text'] is String) {
+          pending.add(_Pending(i, p, part['text'] as String));
         }
       }
     }
+  }
+  if (pending.isEmpty) return false;
+
+  // Phase 2: translate everything in parallel. The caller-supplied [translate]
+  // function is responsible for its own memoisation (the production
+  // [Translator] has an in-memory LRU cache, so the second time a session
+  // re-sends the same history, most calls are cache hits).
+  final results = await Future.wait(
+      pending.map((p) async => MapEntry(p, await translate(p.text))));
+
+  var changed = false;
+  String? lastTranslatedLang;
+  int? lastUserIndex;
+
+  for (final entry in results) {
+    final p = entry.key;
+    final res = entry.value;
+    if (!res.translated) continue;
+    final m = msgs[p.msgIndex] as Map;
+    final content = m['content'];
+    if (content is String) {
+      m['content'] = res.translatedText;
+    } else if (content is List && p.partIndex != null) {
+      (content[p.partIndex!] as Map)['text'] = res.translatedText;
+    }
+    changed = true;
+    lastTranslatedLang = res.detectedLanguage;
+    lastUserIndex = p.msgIndex;
   }
 
   // Append the reply-language instruction to the final user message so the
@@ -272,4 +338,11 @@ Future<bool> translateUserMessagesInBody(
   }
 
   return changed;
+}
+
+class _Pending {
+  final int msgIndex;
+  final int? partIndex; // null for string content
+  final String text;
+  _Pending(this.msgIndex, this.partIndex, this.text);
 }

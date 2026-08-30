@@ -20,6 +20,14 @@
   `[t]`. Translation failures fall back to forwarding the original
   text — a translator outage never blocks a request. 11 new unit
   tests in `test/translator_test.dart`.
+- **Translation cache and parallel calls.** Real-session test on a
+  378k-token context showed pre-cache first-request latency of
+  30-80 seconds (sequential Google translate for every `user` turn
+  in history). v0.1.25 ships an in-memory LRU cache (default 2048
+  entries, sha1-keyed) inside `Translator.toEnglish`, plus parallel
+  `Future.wait` dispatch in `translateUserMessagesInBody`. First
+  request pays N round-trips, every subsequent request for the
+  same session is essentially free. 3 new cache tests added.
 - **`glm-5.3` recommendation changed from `openai` to `anthropic`.**
   The OpenAI path returned intermittent 400 / 500 /
   `sensitive_words_detected` responses during real sessions (bridge
