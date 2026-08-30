@@ -2,7 +2,35 @@
 
 ## Unreleased
 
+### Feat
+
+- **Auto user-message translation for the AgentRouter language gate.**
+  AgentRouter's gateway rejects any request whose `user`-role message
+  contains a sentence in a language outside CN/EN/FR/DE/RU with
+  `content-blocked` (verified 2026-08-30, `docs/LANGUAGE-GATE.md`).
+  The bridge now walks `user` messages in the request body, auto-detects
+  the source language via the keyless Google translate endpoint, and
+  rewrites anything outside the allow-list to English before
+  forwarding. A short instruction in the last user message asks the
+  model to answer in the user's original language, so the response
+  comes back Indonesian / Japanese / etc. without breaking the
+  streaming response. `system`, `assistant`, and tool content are
+  never touched. New `AppConfig.translateUserMessages` flag
+  (default `true`), toggleable from the TUI Proxy Config page with
+  `[t]`. Translation failures fall back to forwarding the original
+  text — a translator outage never blocks a request. 11 new unit
+  tests in `test/translator_test.dart`.
+- **`glm-5.3` recommendation changed from `openai` to `anthropic`.**
+  The OpenAI path returned intermittent 400 / 500 /
+  `sensitive_words_detected` responses during real sessions (bridge
+  log excerpt recorded in `docs/MODEL-ENDPOINTS.md` `glm-5.3`
+  caveat). Anthropic path has been stable in 3-shot probes. Example
+  Anthropic block in the doc now includes `glm-5.3 /An`; the OpenAI
+  example block no longer lists it.
+
 ### Docs
+
+- **`docs/MODEL-ENDPOINTS.md` — per-model upstream endpoint guide.**
 
 - **`docs/MODEL-ENDPOINTS.md` — per-model upstream endpoint guide.**
   Documents which of the two upstream paths (`/v1/messages` Anthropic vs

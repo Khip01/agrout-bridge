@@ -30,13 +30,18 @@ Interpretation:
    the request. That block almost always lives in the system message. The
    threshold is small (roughly 200+ characters of real imperative English);
    a 7-word boilerplate like "You are a helpful assistant." does not count.
-2. **Conversation language does not matter.** 125k+ tokens of pure
-   Indonesian history passes, and an all-English history still fails, as
-   long as the system prompt is the only variable. The gate does not count
-   the English/Indonesian ratio of the whole payload, and it does not
-   re-check "the last N messages". The user prompt, assistant responses,
-   tool results and web-fetch contents are all neutral, **with one
-   exception: base64-encoded blobs** (see below).
+2. **`system`, `assistant`, and tool content language does not matter.**
+   The claim "conversation language does not matter" turned out to be only
+   half true. The gate **does** inspect the language of every `role: "user"`
+   message in the conversation — including those buried deep in the history
+   — and rejects the whole request with `content-blocked` if any of them
+   contains a sentence in a language outside the allow-list (CN/EN/FR/DE/RU).
+   The earlier 125k-token Indonesian probe passed only because the Indonesian
+   text was in `assistant` messages, which the gate does not inspect.
+   Verified 2026-08-30; full evidence in `docs/LANGUAGE-GATE.md`. The bridge
+   translates non-allow-listed user messages to English before forwarding
+   and appends a reply-language instruction so the response comes back in
+   the user's own language.
 3. **Filler does not count.** Repeating boilerplate English (lorem-style
    text) is rejected; real, varied, imperative instruction text is what
    passes. A "dummy" file of random words therefore cannot act as a filter

@@ -473,6 +473,10 @@ class AppState extends State<AgroutApp> {
     if (e.logicalKey == LogicalKey.keyO) { _copyEndpoint(openai: true); return true; }
     if (e.logicalKey == LogicalKey.keyA) { _copyEndpoint(openai: false); return true; }
     if (e.logicalKey == LogicalKey.keyP) { _openPortConfig(); return true; }
+    if (e.logicalKey == LogicalKey.keyT && _infoPage == _InfoPage.proxy) {
+      _toggleTranslation();
+      return true;
+    }
     if (e.logicalKey == LogicalKey.keyL) { _openLoginPanel(); return true; }
     if (e.logicalKey == LogicalKey.keyC && !e.isControlPressed) { _openDailyClaim(); return true; }
     if (e.logicalKey == LogicalKey.keyM && e.isShiftPressed && !e.isControlPressed) {
@@ -1112,6 +1116,11 @@ class AppState extends State<AgroutApp> {
       _section('Endpoints'),
       _kv('OpenAI', 'http://${s.listenAddress}:${s.port}/v1'),
       _kv('Anthropic', 'http://${s.listenAddress}:${s.port}'),
+      _section('Language gate'),
+      _kv('Translate user messages', _config.config.translateUserMessages
+          ? 'on  (Google translate; reply in user language)'
+          : 'off (forward as-is)'),
+      _kv('Toggle', '[t] turn translation on/off (effective immediately)'),
     ];
   }
 
@@ -1349,7 +1358,10 @@ class AppState extends State<AgroutApp> {
           _key(page, '[Shift+O] ', 'clear old stats'),
         ];
       case _InfoPage.proxy:
-        return const [];
+        return [
+          Text('  |  ', style: base),
+          _key(page, '[t] ', 'toggle translate'),
+        ];
     }
   }
 
@@ -1548,6 +1560,9 @@ class AppState extends State<AgroutApp> {
     add('Usage page ([2]) only:', Colors.cyan);
     add('  [Shift+C] Clear all usage stats (asks Y/N)');
     add('  [Shift+O] Clear stats before today (asks Y/N)');
+    add('');
+    add('Proxy Config page ([4]) only:', Colors.cyan);
+    add('  [t]  Toggle user-message translation on/off (effective immediately)');
     add('');
     add('Other:', Colors.cyan);
     add('  [p]  Port configuration panel');
@@ -1748,8 +1763,19 @@ class AppState extends State<AgroutApp> {
     _portPendingSave = p;
     _portState = _PortState.success;
     setState(() {});
-    LogStore.info('Port set to $p (applies after restart)');
-    _setStatus('Port $p saved, applies after restart', duration: 5);
+  }
+
+  void _toggleTranslation() {
+    _config.config.translateUserMessages =
+        !_config.config.translateUserMessages;
+    _config.save();
+    _setStatus(
+      _config.config.translateUserMessages
+          ? 'Translation on (Google translate, reply in user language)'
+          : 'Translation off (forward as-is)',
+      duration: 3,
+    );
+    setState(() {});
   }
 
   /// Intercept port-field keys: [t] test, Enter save, Esc back. Typing still

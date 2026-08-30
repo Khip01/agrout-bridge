@@ -73,6 +73,7 @@ agrout-bridge/
 │       │   ├── daily_claim.dart    # Daily-claim OAuth URL builder + default-browser opener
 │       │   ├── stats_store.dart    # Persistent per-day usage + cost (stats.jsonl, 30-day retention)
 │       │   ├── log_store.dart      # JSONL activity log
+│       │   ├── translator.dart     # User-message translation to English + reply-language injection
 │       │   └── updater.dart        # Self-update: latest.json (raw first, CDN fallback) + Tags API fallback, download .tgz + npm install -g
 │       ├── server/
 │       │   ├── server_controller.dart # HTTP server + routing
@@ -94,6 +95,7 @@ agrout-bridge/
 │   ├── TUI.md
 │   ├── ARCHITECTURE.md
 │   ├── CONTENT-FILTER.md
+│   ├── LANGUAGE-GATE.md
 │   └── MODEL-ENDPOINTS.md
 ├── test/
 ├── AGENTS.md
@@ -355,9 +357,15 @@ upstream gateway** (stable ~123s timeout), not a filter rejection and not
 a bridge bug. The client should declare a context/input limit below the
 measured ceiling so it auto-compacts before the 504 (see
 `docs/CONTENT-FILTER.md` for measured values per model). If you still hit
-a hard `content-blocked`, it is an upstream policy decision, not a bridge
-bug. Request a budget-policy/quota adjustment on your AgentRouter account
-or route Claude traffic directly via a non-AgentRouter provider.
+a hard `content-blocked` that the base64 scrub, `kix.` scrub, and
+system-prompt trim cannot resolve, it is an upstream policy
+decision, not a bridge bug. The most common remaining trigger in
+2026-08-30 testing is a `user`-role message in a non-allow-listed
+language; the bridge's automatic translation handles that case
+without surfacing an error to the client (see
+`docs/LANGUAGE-GATE.md`). Request a budget-policy/quota adjustment on
+your AgentRouter account or route Claude traffic directly via a
+non-AgentRouter provider as a fallback.
 
 ## Port
 

@@ -23,6 +23,7 @@ import '../models/version.dart';
 import '../services/api_client.dart';
 import '../services/log_store.dart';
 import '../services/stats_store.dart';
+import '../services/translator.dart';
 import '../services/waf.dart';
 import 'circuit.dart';
 import 'proxy.dart';
@@ -60,6 +61,7 @@ class ServerController {
   final AgentRouterClient client;
   final CircuitBreaker circuit = CircuitBreaker();
   final ModelHealth modelHealth = ModelHealth();
+  final Translator _translator = Translator();
 
   HttpServer? _server;
   int _actualPort = 0;
@@ -392,6 +394,8 @@ class ServerController {
           LogStore.info('[${_fmtNow()}] $msg');
         },
         trimSystemPrompt: configStore.config.trimSystemPrompt,
+        translator:
+            configStore.config.translateUserMessages ? _translator : null,
       );
     } finally {
       _activeStreams--;

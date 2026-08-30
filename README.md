@@ -35,6 +35,14 @@ TUI for daemon / Docker usage.
   AgentRouter model routed to the right of `/v1/messages` (Anthropic)
   vs `/v1/chat/completions` (OpenAI), with example `opencode.jsonc`
   blocks for both `npm` flavours
+- Auto user-message translation (`docs/LANGUAGE-GATE.md`): on every
+  request the bridge walks `user`-role messages, auto-detects their
+  language, and rewrites anything outside CN/EN/FR/DE/RU to English
+  via Google's keyless translate endpoint before forwarding. The
+  model is asked to answer in the user's original language so the
+  response comes back Indonesian / Japanese / etc. without streaming
+  translation. Toggled on/off from the TUI Proxy Config page with
+  `[t]`.
 
 ## Install
 

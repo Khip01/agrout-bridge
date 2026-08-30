@@ -101,6 +101,20 @@ class AppConfig {
   /// a specific deployment needs the old v0.1.6 behavior.
   bool trimSystemPrompt;
 
+  /// Auto-translate non-supported-language text in user messages to English
+  /// before forwarding, and inject a reply-language instruction so the model
+  /// answers in the user's original language.
+  ///
+  /// Defaults to `true`. AgentRouter's gateway rejects any request whose
+  /// `user`-role message contains a sentence in a language outside
+  /// CN/EN/FR/DE/RU with `content-blocked` (verified 2026-08-30, see
+  /// `docs/LANGUAGE-GATE.md`). The bridge translates only `user` messages
+  /// (system / assistant / tool content is never checked by the gate) and
+  /// appends a flexible "reply in <original language>" instruction so the
+  /// response stays in the user's language. Translation failures fall back to
+  /// forwarding the original text unchanged (never blocks the request).
+  bool translateUserMessages;
+
   /// Local date (`YYYY-MM-DD`) of the last day the user marked the AgentRouter
   /// daily claim as done. When it no longer matches today, the TUI shows the
   /// `Daily Claim!` badge again until `[Shift+M]` / the claim dialog marks the
@@ -113,6 +127,7 @@ class AppConfig {
     this.activeProfileId,
     this.proxyAuthToken = '',
     this.trimSystemPrompt = false,
+    this.translateUserMessages = true,
     this.dailyClaimDoneDate,
   });
 
@@ -122,6 +137,7 @@ class AppConfig {
         if (activeProfileId != null) 'activeProfileId': activeProfileId,
         'proxyAuthToken': proxyAuthToken,
         'trimSystemPrompt': trimSystemPrompt,
+        'translateUserMessages': translateUserMessages,
         if (dailyClaimDoneDate != null) 'dailyClaimDoneDate': dailyClaimDoneDate,
       };
 
@@ -131,6 +147,7 @@ class AppConfig {
         activeProfileId: json['activeProfileId'] as String?,
         proxyAuthToken: json['proxyAuthToken'] as String? ?? '',
         trimSystemPrompt: json['trimSystemPrompt'] as bool? ?? false,
+        translateUserMessages: json['translateUserMessages'] as bool? ?? true,
         dailyClaimDoneDate: json['dailyClaimDoneDate'] as String?,
       );
 }

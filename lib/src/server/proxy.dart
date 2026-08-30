@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../services/api_client.dart';
+import '../services/translator.dart';
 import '../services/waf.dart';
 import 'circuit.dart';
 import 'sse.dart';
@@ -59,6 +60,7 @@ Future<void> proxyRequest({
   void Function(String line)? onLog,
   Duration idleTimeout = const Duration(seconds: 120),
   bool trimSystemPrompt = false,
+  Translator? translator,
 }) async {
   final startedAt = DateTime.now();
   bool streaming = false;
@@ -146,6 +148,30 @@ Future<void> proxyRequest({
             bodyBytes
               ..clear()
               ..addAll(utf8.encode(jsonEncode(body)));
+          }
+          // Translate non-supported-language text in user messages to English
+          // and inject a reply-language instruction. AgentRouter's gateway
+          // rejects any request whose user-role message contains a sentence in
+          // a language outside CN/EN/FR/DE/RU with `content-blocked`
+          // (verified 2026-08-30, docs/LANGUAGE-GATE.md). Only user messages
+          // are checked by the gate, so system/assistant/tool content is left
+          // untouched. Translation failures fall back to the original text so a
+          // translate outage never blocks the request.
+          if (translator != null) {
+            try {
+              final didTranslate = await translateUserMessagesInBody(
+                body,
+                (text) => translator.toEnglish(text),
+              );
+              if (didTranslate) {
+                bodyBytes
+                  ..clear()
+                  ..addAll(utf8.encode(jsonEncode(body)));
+                logMsg('PROXY translated user message(s) to English');
+              }
+            } catch (_) {
+              // Never block a request on a translation failure.
+            }
           }
         }
       } catch (_) {}
