@@ -416,6 +416,26 @@ The status bar's left slot is a single indicator: `Proxy stopped` (red),
 `Streaming (N)` (yellow), a transient status message, or `Proxy ready` (green).
 The right side shows uptime plus the time since the last model refresh.
 
+## Debug body dumps
+
+Per-request body dumps land in `/tmp/opencode/agrout-debug/` when
+debug mode is on (the directory is overridable via `AGRROUT_DEBUG_DIR`,
+gated on either `AGRROUT_DEBUG=1` or a non-empty `AGRROUT_DEBUG_DIR`).
+Three files per request:
+
+- `<ts>_in_<model>.json` — pre-mutation body the client sent
+- `<ts>_out_<model>.json` — post-mutation body forwarded to upstream
+- `<ts>_upstream_<model>.json` — upstream error body (only for
+  status >= 400)
+
+Each file is a JSON header (model, format, stream, body_bytes,
+status, request_id) followed by a separator and the body itself
+(clamped at 256 KiB). Use these to diff what the client sent vs.
+what the bridge forwarded, especially when investigating
+content-blocked / sensitive_words_detected from the upstream. The
+default is OFF to avoid disk floods; turn on with `AGRROUT_DEBUG=1`
+in the environment when reproducing an issue.
+
 ## Usage stats
 
 `StatsStore` persists per-request usage grouped by calendar day to
