@@ -42,7 +42,15 @@ bool get _debugEnabled {
 /// request body (clamped to [_debugMaxBody]). Files are named
 /// `<timestamp>_<tag>_<model>_<n>.json` and live under
 /// [_debugDirEnv] (default `/tmp/opencode/agrout-debug`).
-const int _debugMaxBody = 256 * 1024; // 256 KiB per artifact
+/// Debug-body clamp. Overridable via `AGRROUT_DEBUG_MAX_BODY` (bytes) so a
+/// reproduction session can capture the full 2MB+ body when hunting a
+/// sensitive-words trigger. Default 256 KiB keeps disk usage sane for
+/// everyday debugging.
+int get _debugMaxBody {
+  final v = Platform.environment['AGRROUT_DEBUG_MAX_BODY'];
+  if (v == null) return 256 * 1024;
+  return int.tryParse(v) ?? 256 * 1024;
+}
 void _debugWrite(String tag, Map<String, dynamic> meta, dynamic body) {
   if (!_debugEnabled) return;
   try {
@@ -56,14 +64,16 @@ void _debugWrite(String tag, Map<String, dynamic> meta, dynamic body) {
     if (body == null) {
       bodyStr = '';
     } else if (body is String) {
-      bodyStr = body.length > _debugMaxBody
-          ? body.substring(0, _debugMaxBody) + '\n[truncated at $_debugMaxBody]'
-          : body;
+      // JSON-encode the raw body so control characters (raw newlines in
+      // tool output, etc.) survive as \n escapes and the file stays
+      // parseable with any JSON reader.
+      bodyStr = jsonEncode(body);
     } else {
-      final enc = jsonEncode(body);
-      bodyStr = enc.length > _debugMaxBody
-          ? '${enc.substring(0, _debugMaxBody)}\n[truncated at $_debugMaxBody]'
-          : enc;
+      bodyStr = jsonEncode(body);
+    }
+    if (bodyStr.length > _debugMaxBody) {
+      bodyStr =
+          '${bodyStr.substring(0, _debugMaxBody)}\n[truncated at $_debugMaxBody]';
     }
     f.writeAsStringSync(
       '${jsonEncode(meta)}\n${'-' * 60}\n$bodyStr\n',
