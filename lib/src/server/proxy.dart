@@ -301,11 +301,14 @@ Future<void> proxyRequest({
 
     statusCode = upstreamResp.statusCode;
 
-    // For failed responses, capture the body so the failure is reproducible
-    // from the debug artifacts. For 200s we already have the live stream; no
-    // need to buffer it.
+    // For non-streaming failed responses, capture the body so the failure
+    // is reproducible from the debug artifacts. For streaming responses we
+    // do not buffer the body here: a HttpResponse can only be listened to
+    // once, and the SSE-pump below needs the body stream intact. The
+    // 200-streaming-success path also skips this -- there is nothing to
+    // diagnose, the live stream is the answer.
     String? _upstreamBodyForLog;
-    if (statusCode >= 400) {
+    if (statusCode >= 400 && !streaming) {
       try {
         _upstreamBodyForLog = await upstreamResp
             .transform(utf8.decoder)
