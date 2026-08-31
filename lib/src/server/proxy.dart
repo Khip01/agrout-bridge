@@ -205,7 +205,7 @@ Future<void> proxyRequest({
     if (statusCode == 200) {
       circuit.recordSuccess();
     } else if (statusCode >= 500) {
-      circuit.recordFailure();
+      circuit.recordFailure(statusCode);
       if (model != null) modelHealth.recordFailure(model, statusCode);
     }
 
@@ -288,12 +288,12 @@ Future<void> proxyRequest({
     }
   } on HttpException catch (e) {
     await sendJsonError(502, 'upstream_error', e.message);
-    circuit.recordFailure();
+    circuit.recordFailure(0);
     if (model != null) modelHealth.recordFailure(model, 502);
     logMsg('PROXY ERROR ${e.message}');
   } catch (e) {
     await sendJsonError(502, 'upstream_error', e.toString());
-    circuit.recordFailure();
+    circuit.recordFailure(0);
     if (model != null) modelHealth.recordFailure(model, 502);
     logMsg('PROXY ERROR $e');
   } finally {

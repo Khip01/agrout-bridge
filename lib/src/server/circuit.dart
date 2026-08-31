@@ -42,9 +42,15 @@ class _Failure {
   _Failure(this.at, this.statusCode);
 }
 
-/// Open / closed circuit breaker that trips on consecutive final 5xx and
-/// transport errors. 429 responses do NOT trip the breaker; they're a
-/// per-model throttle, the model itself is still reachable.
+/// Open / closed circuit breaker that trips on consecutive final transport-
+/// level upstream failures (502, 503, 504, socket exceptions, host lookup
+/// failures). 4xx and "policy" 5xx (notably AgentRouter's `500` with body
+/// `{"error":{"code":"sensitive_words_detected" | "content-blocked" | ...}}`)
+/// are **permanent** caller-or-policy rejections: the upstream is healthy
+/// and the same request will fail the same way. Counting those would open
+/// the circuit for a model that is actually fine, masking it for 1-10
+/// minutes. The per-model `ModelHealth` table still records 4xx and policy
+/// 5xx so the TUI can surface a misbehaving model.
 class CircuitBreaker {
   static const int _failureThreshold = 5;
   static const int _cooldownMs = 60 * 1000; // 1 minute
@@ -66,12 +72,28 @@ class CircuitBreaker {
     _currentCooldown = _cooldownMs;
   }
 
-  void recordFailure() {
+  /// Record an upstream failure. [statusCode] is the HTTP status the
+  /// upstream returned (0 means a transport error -- DNS, socket, TLS,
+  /// timeout). Only transport-level failures contribute to the breaker;
+  /// permanent rejections (4xx and policy 5xx) are ignored.
+  void recordFailure([int statusCode = 0]) {
+    if (_isPermanentRejection(statusCode)) return;
     _consecutiveFails++;
     if (_consecutiveFails >= _failureThreshold) {
       _openUntil = DateTime.now().millisecondsSinceEpoch + _currentCooldown;
       _currentCooldown = (_currentCooldown * 2).clamp(_cooldownMs, _maxCooldownMs);
     }
+  }
+
+  /// True for HTTP statuses that signal a permanent caller or policy
+  /// rejection (4xx) and the 5xx codes AgentRouter uses for content /
+  /// language / sensitive_words gates. None of these indicate that the
+  /// upstream is unhealthy, so the circuit breaker ignores them.
+  static bool _isPermanentRejection(int statusCode) {
+    if (statusCode == 0) return false; // transport error
+    if (statusCode >= 400 && statusCode < 500) return true;
+    if (statusCode == 500) return true; // agentrouter policy gate
+    return false; // 502/503/504: real upstream trouble
   }
 
   Map<String, dynamic> snapshot() => {

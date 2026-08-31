@@ -28,6 +28,15 @@
   `Future.wait` dispatch in `translateUserMessagesInBody`. First
   request pays N round-trips, every subsequent request for the
   same session is essentially free. 3 new cache tests added.
+- **Circuit breaker ignores 4xx and policy 5xx.** Real-session
+  testing showed AgentRouter's `500 sensitive_words_detected` (a
+  permanent policy gate) was being counted as a transport failure
+  and tripping the breaker, masking a healthy model for 1-10
+  minutes. `CircuitBreaker.recordFailure(statusCode)` now only
+  counts transport-level failures (HTTP `502/503/504` and socket
+  errors); 4xx and `500` are skipped. The per-model `ModelHealth`
+  table still records every failure for `/v1/models` filtering and
+  TUI surfacing. 3 new circuit tests added.
 - **`glm-5.3` recommendation changed from `openai` to `anthropic`.**
   The OpenAI path returned intermittent 400 / 500 /
   `sensitive_words_detected` responses during real sessions (bridge

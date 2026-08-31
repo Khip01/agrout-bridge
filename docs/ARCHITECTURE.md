@@ -78,8 +78,8 @@ Client ──> POST /v1/messages         ──>  proxy.dart
 Upstream ──> 200 text/event-stream    <──  │
         (or application/json)
                                            ├─ capture fresh Set-Cookie into profile
-                                           ├─ circuit.recordSuccess / Failure
-                                           ├─ modelHealth.recordFailure (5xx)
+                                            ├─ circuit.recordSuccess / Failure (transport only)
+                                            ├─ modelHealth.recordFailure (4xx + 5xx, for /v1/models filtering)
                                            ├─ pumpSse for SSE; buffered copy otherwise
                                            └─ record usage + cost into StatsStore (per-day)
 Client  <──  200 (or 4xx / 5xx)       <──

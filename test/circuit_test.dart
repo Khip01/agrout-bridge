@@ -40,6 +40,36 @@ void main() {
       }
       expect(cb.isOpen, isFalse);
     });
+
+    test('4xx and 500 (policy gate) do not trip the breaker', () {
+      // Permanent caller/policy rejections are not transport problems;
+      // counting them would mask a healthy model.
+      final cb = CircuitBreaker();
+      for (final code in const [400, 401, 403, 404, 422, 429, 500]) {
+        for (var i = 0; i < 5; i++) {
+          cb.recordFailure(code);
+        }
+      }
+      expect(cb.isOpen, isFalse,
+          reason: 'permanent rejections must not open the breaker');
+      expect(cb.consecutiveFails, 0);
+    });
+
+    test('transport-only 502/503/504 trip the breaker', () {
+      final cb = CircuitBreaker();
+      for (var i = 0; i < 5; i++) {
+        cb.recordFailure(503);
+      }
+      expect(cb.isOpen, isTrue);
+    });
+
+    test('transport error (status 0, e.g. socket / DNS) trips the breaker', () {
+      final cb = CircuitBreaker();
+      for (var i = 0; i < 5; i++) {
+        cb.recordFailure(0);
+      }
+      expect(cb.isOpen, isTrue);
+    });
   });
 
   group('ModelHealth', () {
