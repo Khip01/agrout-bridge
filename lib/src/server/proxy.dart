@@ -132,22 +132,22 @@ Future<void> proxyRequest({
           // `thinking: { type: "enabled", budget_tokens }` (HTTP 200), so we
           // translate here. We only touch Claude-family models so native
           // OpenAI reasoning (e.g. o-series) is left intact for those routes.
-        if (format == StreamFormat.openai && model != null) {
-          if (normalizeReasoning(model, body)) {
+          if (format == StreamFormat.openai && model != null) {
+            if (normalizeReasoning(model, body)) {
               bodyBytes
                 ..clear()
                 ..addAll(utf8.encode(jsonEncode(body)));
             }
-          }
-          // Neutralize base64-encoded content (WebFetch markdown data URIs,
-          // file-read media blobs) before forwarding. Large accumulated base64
-          // trips agentrouter.org's content filter with a hard
-          // `content-blocked` even though the rest of the request is clean.
-          // Scrub always runs so both OpenAI and Anthropic paths are covered.
-          if (scrubBase64Payload(body)) {
-            bodyBytes
-              ..clear()
-              ..addAll(utf8.encode(jsonEncode(body)));
+            // Neutralize base64-encoded content (WebFetch markdown data URIs,
+            // file-read media blobs) before forwarding. Large accumulated base64
+            // trips agentrouter.org's content filter with a hard
+            // `content-blocked` even though the rest of the request is clean.
+            // Scrub always runs so both OpenAI and Anthropic paths are covered.
+            if (scrubBase64Payload(body)) {
+              bodyBytes
+                ..clear()
+                ..addAll(utf8.encode(jsonEncode(body)));
+            }
           }
           // Translate non-supported-language text in user messages to English
           // and inject a reply-language instruction. AgentRouter's gateway
@@ -155,8 +155,10 @@ Future<void> proxyRequest({
           // a language outside CN/EN/FR/DE/RU with `content-blocked`
           // (verified 2026-08-30, docs/LANGUAGE-GATE.md). Only user messages
           // are checked by the gate, so system/assistant/tool content is left
-          // untouched. Translation failures fall back to the original text so a
-          // translate outage never blocks the request.
+          // untouched. Translation runs on BOTH OpenAI and Anthropic paths
+          // because the gate operates at the gateway layer, not the per-format
+          // translator. Translation failures fall back to the original text so
+          // a translate outage never blocks the request.
           if (translator != null) {
             try {
               final didTranslate = await translateUserMessagesInBody(
