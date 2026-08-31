@@ -204,4 +204,84 @@ void main() {
       expect(calls, 3);
     });
   });
+
+  group('expandFillerSystemPromptsInBody', () {
+    test('expands the OpenAI-style top-of-messages system prompt', () {
+      final body = {
+        'messages': [
+          {'role': 'system', 'content': 'You are a helpful assistant.'},
+          {'role': 'user', 'content': 'hi'},
+        ],
+      };
+      expect(expandFillerSystemPromptsInBody(body), isTrue);
+      expect((body['messages'] as List)[0]['content'],
+          isNot('You are a helpful assistant.'));
+      expect((body['messages'] as List)[0]['content'], contains('helpful'));
+    });
+
+    test('expands the Anthropic top-level system string', () {
+      final body = {
+        'system': 'You are a helpful assistant.',
+        'messages': [
+          {'role': 'user', 'content': 'hi'},
+        ],
+      };
+      expect(expandFillerSystemPromptsInBody(body), isTrue);
+      expect(body['system'], isNot('You are a helpful assistant.'));
+    });
+
+    test('expands the Anthropic top-level system list', () {
+      final body = {
+        'system': [
+          {'type': 'text', 'text': 'You are a helpful assistant.'},
+        ],
+        'messages': [
+          {'role': 'user', 'content': 'hi'},
+        ],
+      };
+      expect(expandFillerSystemPromptsInBody(body), isTrue);
+      expect((body['system'] as List).first['text'],
+          isNot('You are a helpful assistant.'));
+    });
+
+    test('expands prefix matches and short variants', () {
+      // "You are a helpful assistant. Think carefully." -- the toxic
+      // prefix on a longer prompt is still enough to trip the gate.
+      final body = {
+        'messages': [
+          {
+            'role': 'system',
+            'content': 'You are a helpful assistant. Think carefully.'
+          },
+          {'role': 'user', 'content': 'hi'},
+        ],
+      };
+      expect(expandFillerSystemPromptsInBody(body), isTrue);
+    });
+
+    test('leaves a real, long system prompt alone', () {
+      final good =
+          'You are a helpful AI coding assistant. Think step by step, '
+              'be concise, and follow the user instructions carefully. '
+              'Always prefer correct, working solutions and explain your '
+              'reasoning briefly before acting.';
+      final body = {
+        'messages': [
+          {'role': 'system', 'content': good},
+          {'role': 'user', 'content': 'hi'},
+        ],
+      };
+      expect(expandFillerSystemPromptsInBody(body), isFalse);
+      expect((body['messages'] as List)[0]['content'], good);
+    });
+
+    test('leaves a no-system-prompt body unchanged', () {
+      final body = {
+        'messages': [
+          {'role': 'user', 'content': 'hi'},
+        ],
+      };
+      expect(expandFillerSystemPromptsInBody(body), isFalse);
+    });
+  });
 }
