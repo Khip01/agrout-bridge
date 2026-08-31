@@ -129,13 +129,83 @@ The translator runs only when `config.translateUserMessages` is `true`
 translation step — the toggle is in-memory and persists to
 `~/.config/agrout-bridge/config.json` on change.
 
+## Short-text detector override (two-pass, added v0.1.25)
+
+Google auto-detect is unreliable for short inputs. Probed 2026-08-31:
+`"Halo"` was labelled `en`, `"Saya lapar"` was labelled `ms`. Both
+are Indonesian and should trigger translation, but auto-detect
+returned the wrong code and the bridge would have forwarded them as
+if they were allowed.
+
+Two fixes shipped together:
+
+1. **Length gate.** Any message whose non-whitespace character count
+   is 24 or fewer is treated as "unknown language" regardless of
+   what auto-detect returns, and is always sent to the translation
+   step. `_shortTextThreshold = 24` in `translator.dart`.
+2. **Two-pass fetch.** `_fetch` calls the endpoint twice when the
+   first pass returns the text unchanged (a sign that `auto` matched
+   `en` and skipped translation): the second pass forces `sl=id`
+   (Indonesian source) as a fallback. The result of whichever pass
+   produced a different translated string is used. If both passes
+   return the original text, the original is forwarded as-is
+   (translation failure fallback).
+
+This means `"Halo"` -> first pass `en` (unchanged) -> second pass
+`sl=id` -> `"Hello"`. The gate sees English and does not block.
+
+## Filler system-prompt expansion (added v0.1.25)
+
+The exact string `"You are a helpful assistant."` (with trailing
+period) deterministically trips AgentRouter's `sensitive_words_detected`
+500 on every model, even when the rest of the request is clean English
+(probed 2026-08-31, 5/5 retries). The same sentence without the
+period, or followed by any additional instruction text, passes.
+
+Root cause: the gate requires a coherent English instruction block of
+at least ~200 characters in the system message (see
+`docs/CONTENT-FILTER.md`). The 30-character filler falls below that
+threshold and the gate fires the sensitive-words path as a side
+effect.
+
+Fix: `expandFillerSystemPromptsInBody` in `translator.dart` detects
+that exact filler string and replaces it with a longer, instruction-rich
+English block before the request is forwarded. The replacement contains
+real instructions (language, format, safety) so it passes the coherent-
+block check. The original filler came from the client (e.g. OpenCode
+default) and is not shown to the user.
+
+## Sensitive Chinese phrase scrub (protection B, added v0.1.25)
+
+A separate `sensitive_words_detected` 500 gate fires when
+politically sensitive Chinese phrases appear anywhere in the request
+body, including `assistant` and `tool` history. These phrases entered
+sessions during hcnsec.cn provider research (tool output from live
+API probes). The user-message translator (protection A) does not
+touch `assistant`/`tool` content, so it cannot remove them.
+
+Protection B (`scrubSensitiveZh` in `translator.dart`) runs a regex
+over the full serialized body and replaces matching phrases with
+`[redacted]` before the request is forwarded. The scrub runs
+**before** translation (order: B then A) so that translated content
+does not re-introduce the phrase in a different encoding.
+
+Known phrases covered by the regex (as of v0.1.25):
+
+- `新疆幻城网安科技有限公司` and shorter variants
+- A set of flag emoji sequences associated with contested territories
+
+The regex is in `_sensitiveZhRegex` in `translator.dart`. Add new
+phrases there if new `sensitive_words_detected` 500s appear with
+Chinese content in the body.
+
 ## Limitations
 
 - Detection is best-effort. A single Indonesian word slips through the
   detector and the bridge forwards it; the gate did not trigger in
-  that case in our probes. Two-word Indonesian phrases (`"Halo,
-  apa"`) do trigger. The bridge does not second-guess the detector —
-  it relies on the upstream endpoint to make the call.
+  that case in our probes. The short-text gate (24 chars) partially
+  compensates, but multi-word phrases that auto-detect labels as
+  an allowed language may still slip through.
 - The translation is a **best-effort** preservation of meaning. Tone,
   register, and coding style in the user message can shift slightly.
   This is acceptable for agentic sessions that send instructions and

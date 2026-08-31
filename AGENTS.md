@@ -66,19 +66,19 @@ agrout-bridge/
 │       │   ├── profile.dart        # Profile + Config stores (port persist)
 │       │   └── version.dart        # Bridge version constant
 │       ├── services/
-│       │   ├── spoof.dart          # Claude Code spoof header constants
+│       │   ├── spoof.dart          # the assistant spoof header constants
 │       │   ├── waf.dart            # WAF cookie jar (warmup, capture, merge, persist)
 │       │   ├── api_client.dart     # AgentRouter HTTP (New API endpoints)
 │       │   ├── login.dart          # Local sign-in server (paste API key, validate /v1/models)
 │       │   ├── daily_claim.dart    # Daily-claim OAuth URL builder + default-browser opener
 │       │   ├── stats_store.dart    # Persistent per-day usage + cost (stats.jsonl, 30-day retention)
 │       │   ├── log_store.dart      # JSONL activity log
-│       │   ├── translator.dart     # User-message translation to English + reply-language injection
+│       │   ├── translator.dart     # User-message translation (EN/FR/DE/RU/ZH allow-list), sensitive Chinese scrub, filler expand, LRU cache, parallel dispatch
 │       │   └── updater.dart        # Self-update: latest.json (raw first, CDN fallback) + Tags API fallback, download .tgz + npm install -g
 │       ├── server/
-│       │   ├── server_controller.dart # HTTP server + routing
-│       │   ├── openai_handler.dart    # OpenAI-compatible proxy
-│       │   ├── anthropic_handler.dart # Anthropic-compatible proxy
+│       │   ├── server_controller.dart # HTTP server + routing; owns singleton Translator
+│       │   ├── proxy.dart             # Forward + WAF capture + usage extraction + debug body dumps
+│       │   ├── circuit.dart           # Circuit breaker (transport-only) + per-model health
 │       │   └── sse.dart               # SSE stream pump (format-aware terminator)
 │       └── tui/
 │           └── app.dart            # Nocterm TUI: 4 pages + log side panel
@@ -419,22 +419,29 @@ The right side shows uptime plus the time since the last model refresh.
 ## Debug body dumps
 
 Per-request body dumps land in `/tmp/opencode/agrout-debug/` when
-debug mode is on (the directory is overridable via `AGRROUT_DEBUG_DIR`,
-gated on either `AGRROUT_DEBUG=1` or a non-empty `AGRROUT_DEBUG_DIR`).
-Three files per request:
+debug mode is on. Enable with `AGRROUT_DEBUG=1` or by setting
+`AGRROUT_DEBUG_DIR=<path>` to a custom directory. Three files per
+request:
 
-- `<ts>_in_<model>.json` — pre-mutation body the client sent
-- `<ts>_out_<model>.json` — post-mutation body forwarded to upstream
-- `<ts>_upstream_<model>.json` — upstream error body (only for
-  status >= 400)
+- `<ts>_in_<model>.json` — inbound body after all scrubs + translation
+  (what the bridge actually forwarded to upstream)
+- `<ts>_out_<model>.json` — outbound metadata (response headers, status,
+  timing)
+- `<ts>_upstream_<model>.json` — raw upstream response body (non-streaming
+  only; empty for SSE requests to avoid double-listen)
 
-Each file is a JSON header (model, format, stream, body_bytes,
-status, request_id) followed by a separator and the body itself
-(clamped at 256 KiB). Use these to diff what the client sent vs.
-what the bridge forwarded, especially when investigating
-content-blocked / sensitive_words_detected from the upstream. The
-default is OFF to avoid disk floods; turn on with `AGRROUT_DEBUG=1`
-in the environment when reproducing an issue.
+Each file starts with a JSON metadata header (`model`, `path`,
+`stream`, `status`, `request_id`, `ts`) followed by `------...------`
+separator and the body. Bodies are `jsonEncode`'d so raw newlines and
+control characters survive as `\n` escapes and the file stays parseable
+by any JSON reader. Body is clamped to `AGRROUT_DEBUG_MAX_BODY` bytes
+(default 256 KiB). Set a larger value (e.g. `AGRROUT_DEBUG_MAX_BODY=4000000`)
+to capture full 2 MB+ bodies when hunting a `sensitive_words_detected`
+trigger.
+
+The default is OFF to avoid disk floods. Turn on with `AGRROUT_DEBUG=1`
+in the environment when reproducing an issue; turn off again when done.
+The debug directory is not cleaned up automatically.
 
 ## Usage stats
 

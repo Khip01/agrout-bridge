@@ -8,5 +8,5 @@
 /// Keep the fallback in sync with `package.json` `version` when releasing.
 const bridgeVersion = String.fromEnvironment(
   'PACKAGE_VERSION',
-  defaultValue: '0.1.24',
+  defaultValue: '0.1.25',
 );

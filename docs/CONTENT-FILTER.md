@@ -46,6 +46,55 @@ Interpretation:
    text) is rejected; real, varied, imperative instruction text is what
    passes. A "dummy" file of random words therefore cannot act as a filter
    bypass and can actively trip the gate.
+4. **`"You are a helpful assistant."` (with period) deterministically trips
+   the gate** with `sensitive_words_detected` (HTTP 500), on every model,
+   every retry (probed 2026-08-31, 5/5). The same phrase without the
+   trailing period, or followed by additional instruction text, passes.
+   This is a special case of point 1: the 30-char filler falls below the
+   coherent-block threshold and the gate fires its sensitive-words path as
+   a side effect. The bridge detects this exact string and expands it to a
+   longer instruction block before forwarding. See
+   `expandFillerSystemPromptsInBody` in `lib/src/services/translator.dart`
+   and `docs/LANGUAGE-GATE.md` "Filler system-prompt expansion".
+
+## `sensitive_words_detected` (HTTP 500): a separate gate
+
+Besides `content-blocked` (400), AgentRouter has a second rejection path:
+`HTTP 500` with body `{"error": "sensitive_words_detected", ...}`. This is
+distinct from the language-gate and the base64/kix scrub:
+
+- It fires on specific politically sensitive Chinese phrases in **any role**
+  in the request body, including `assistant` and `tool` history. The phrases
+  were introduced during hcnsec.cn provider research (tool output from live
+  API probes). See `docs/LANGUAGE-GATE.md` "Sensitive Chinese phrase scrub".
+- It fires on the exact `"You are a helpful assistant."` filler (see point 4
+  above).
+- `deepseek-v4-flash` on the OpenAI path (`/v1/chat/completions`) is more
+  sensitive than other models: it trips this gate on phrase content that
+  GLM-5.3 on the Anthropic path tolerates. Moving deepseek to the Anthropic
+  path did not help; the fix is the phrase scrub in the bridge.
+
+### Double protection: scrub B then translate A
+
+The bridge applies two layers of protection on every request, in this order:
+
+1. **B: Sensitive phrase scrub** (`scrubSensitiveZh` in
+   `lib/src/services/translator.dart`). Runs a regex over the full
+   serialized body and replaces matching Chinese phrases with `[redacted]`.
+   Covers all roles (`user`, `assistant`, `tool`, `system`).
+2. **A: User-message translation** (`translateUserMessagesInBody`). Runs
+   only on `user`-role messages and rewrites non-allow-listed languages to
+   English. Runs after B so that translated content cannot reintroduce a
+   sensitive phrase via a different encoding.
+
+The order is important: running A before B could translate a phrase into
+English before the Chinese regex runs, missing the scrub. B then A is the
+canonical order.
+
+Cross-references: `docs/LANGUAGE-GATE.md` covers the full language-gate
+design including filler expansion, short-text two-pass, and the sensitive
+Chinese phrase list. `docs/MODEL-ENDPOINTS.md` covers which models are
+most sensitive to which path.
 
 ## Base64-encoded blobs in tool results trip the gate
 

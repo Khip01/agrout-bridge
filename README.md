@@ -41,8 +41,22 @@ TUI for daemon / Docker usage.
   via Google's keyless translate endpoint before forwarding. The
   model is asked to answer in the user's original language so the
   response comes back Indonesian / Japanese / etc. without streaming
-  translation. Toggled on/off from the TUI Proxy Config page with
-  `[t]`.
+  translation. Includes short-text two-pass retry (fixes mis-detection
+  on words like `"Halo"`), filler system-prompt expansion
+  (`"You are a helpful assistant."` triggers `sensitive_words_detected`
+  without expansion), and in-memory LRU cache + parallel dispatch for
+  low latency on long sessions. Toggled on/off from the TUI Proxy
+  Config page with `[t]`.
+- Sensitive Chinese phrase scrub: regex over the full request body
+  (all roles) removes politically sensitive phrases that trigger
+  AgentRouter's `sensitive_words_detected` 500 gate. Runs before
+  translation so the scrub always sees the original content. See
+  `docs/LANGUAGE-GATE.md` and `docs/CONTENT-FILTER.md`.
+- Debug body dumps: set `AGRROUT_DEBUG=1` to write three JSON files
+  per proxied request to `/tmp/opencode/agrout-debug/` (inbound
+  after scrub/translate, outbound metadata, upstream response).
+  Bodies are JSON-encoded and clamped to 256 KiB by default
+  (`AGRROUT_DEBUG_MAX_BODY` to override). Off by default.
 
 ## Install
 

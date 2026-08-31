@@ -87,6 +87,34 @@ back to the panel signal alone and is marked **panel-only**.
 | `deepseek-v4-flash` | `openai`, `anthropic`              | 3/3 200 OK, ~1435 ms avg              | 3/3 200 OK, ~1252 ms avg               | **openai** (faster, stable on both) | `AgentRouter - DeepSeek V4 Flash /Op` |
 | `glm-5.3`          | `anthropic`, `openai`               | 3/3 200 OK, ~2123 ms avg              | 3/3 200 OK, ~1450 ms avg               | **anthropic** (stable — moved off `openai` after intermittent 400 / `sensitive_words_detected`; see *caveat* below) | `AgentRouter - GLM 5.3 /An` |
 
+### `deepseek-v4-flash` caveat
+
+`deepseek-v4-flash` is recommended on the **OpenAI path** (`/Op`).
+It probed stable on both paths (3/3 200 OK each), and the OpenAI
+path was marginally faster (~1,252 ms vs ~1,435 ms avg). It stays
+on `/Op`.
+
+However, `deepseek-v4-flash` on the OpenAI path is **more sensitive
+to the `sensitive_words_detected` 500 gate** than GLM-5.3. During
+hcnsec.cn provider research, politically sensitive Chinese phrases
+entered the session as tool output (`assistant`/`tool` history).
+DeepSeek tripped 500 on those phrases; GLM on the Anthropic path
+tolerated the same payload. The root cause was content, not the
+path; moving DeepSeek to the Anthropic path did not help.
+
+Fix shipped in v0.1.25: the bridge scrubs those phrases (protection
+B, `scrubSensitiveZh`) before forwarding on every request. With the
+scrub active, DeepSeek on `/Op` returns 200 OK for the same sessions
+that previously triggered the 500. The recommendation remains
+`openai` (`/Op`).
+
+If `sensitive_words_detected` 500 re-appears on DeepSeek after a new
+session accumulates new Chinese content in `assistant`/`tool` history:
+check `AGRROUT_DEBUG=1` dumps for the phrase, add it to
+`_sensitiveZhRegex` in `lib/src/services/translator.dart`, and
+re-probe. See `docs/CONTENT-FILTER.md` "sensitive_words_detected"
+and `docs/LANGUAGE-GATE.md` "Sensitive Chinese phrase scrub".
+
 ### `glm-5.3` caveat
 
 The recommendation for `glm-5.3` was **changed from `openai` to

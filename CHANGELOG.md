@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## Unreleased (v0.1.25)
 
 ### Feat
 
@@ -8,118 +8,161 @@
   AgentRouter's gateway rejects any request whose `user`-role message
   contains a sentence in a language outside CN/EN/FR/DE/RU with
   `content-blocked` (verified 2026-08-30, `docs/LANGUAGE-GATE.md`).
-  The bridge now walks `user` messages in the request body, auto-detects
-  the source language via the keyless Google translate endpoint, and
+  The bridge now walks every `user` message in the request body,
+  auto-detects the source language via the keyless Google translate
+  endpoint (`translate.googleapis.com/translate_a/single`), and
   rewrites anything outside the allow-list to English before
-  forwarding. A short instruction in the last user message asks the
-  model to answer in the user's original language, so the response
-  comes back Indonesian / Japanese / etc. without breaking the
-  streaming response. `system`, `assistant`, and tool content are
-  never touched. New `AppConfig.translateUserMessages` flag
+  forwarding. A short `[System note: Respond in <lang>]` instruction
+  is appended to the last user message so the model replies in the
+  user's original language. `system`, `assistant`, and tool content
+  are never touched. New `AppConfig.translateUserMessages` flag
   (default `true`), toggleable from the TUI Proxy Config page with
   `[t]`. Translation failures fall back to forwarding the original
-  text — a translator outage never blocks a request. 11 new unit
-  tests in `test/translator_test.dart`.
-- **Translation cache and parallel calls.** Real-session test on a
-  378k-token context showed pre-cache first-request latency of
-  30-80 seconds (sequential Google translate for every `user` turn
-  in history). v0.1.25 ships an in-memory LRU cache (default 2048
-  entries, sha1-keyed) inside `Translator.toEnglish`, plus parallel
-  `Future.wait` dispatch in `translateUserMessagesInBody`. First
-  request pays N round-trips, every subsequent request for the
-  same session is essentially free. 3 new cache tests added.
-- **Circuit breaker ignores 4xx and policy 5xx.** Real-session
-  testing showed AgentRouter's `500 sensitive_words_detected` (a
-  permanent policy gate) was being counted as a transport failure
-  and tripping the breaker, masking a healthy model for 1-10
-  minutes. `CircuitBreaker.recordFailure(statusCode)` now only
-  counts transport-level failures (HTTP `502/503/504` and socket
-  errors); 4xx and `500` are skipped. The per-model `ModelHealth`
-  table still records every failure for `/v1/models` filtering and
-  TUI surfacing. 3 new circuit tests added.
-- **User-message translation runs on both upstream paths.** The
-  translation block was nested inside the
-  `format == StreamFormat.openai` branch, so Anthropic-path
-  callers (`/v1/messages`) forwarded user messages verbatim and
-  hit the language gate. The block is now sibling to (not nested
-  inside) the OpenAI-only block; translation and the
-  reply-language instruction now fire for both paths.
-- **Expand narrow filler system prompts past the
-  `sensitive_words_detected` gate.** Probing the upstream on
-  2026-08-31 surfaced a deterministic 500 when the request body
-  carries the exact string `"You are a helpful assistant."`
-  (case-sensitive, with trailing period) as the system prompt.
-  Five retries reproduce 5/5. The fix detects that exact
-  boilerplate and swaps it for a longer, instruction-rich English
-  block that the gate accepts. Both OpenAI (first system
-  message) and Anthropic (top-level `system` field, string or
-  content-block list) shapes are handled by
-  `expandFillerSystemPromptsInBody`. The expansion runs before
-  user-message translation in `proxyRequest`. 6 new tests added.
-- **Debug body dumps + short-text translate override.** Real
-  sessions kept hitting intermittent content-blocked upstream and
-  there was no way to inspect what the bridge actually sent. Two
-  new behaviors: (1) per-request body dumps in
-  `/tmp/opencode/agrout-debug/` (`in` = client body, `out` =
-  post-mutation body, `upstream` = error body for >=400). Gated on
-  `AGRROUT_DEBUG=1` or a non-empty `AGRROUT_DEBUG_DIR`; default
-  off to avoid disk floods. (2) For 24-non-whitespace-char-or-less
-  text the Google auto-detect mismatch rate is too high to trust
-  (probed 2026-08-31: "Halo" -> `en`, "Saya lapar" -> `ms`); the
-  translator now always translates short text, and `_fetch` does a
-  two-pass retry (auto-detect, then `sl=id` if the first pass
-  returned unchanged) so words like "Halo" actually become
-  "Hello" before they reach the upstream. 5 new short-text tests
-  added.
-- **Don't double-listen upstream response stream when logging.**
-  The 2026-08-31 debug-body capture for `status >= 400` was
-  calling `upstreamResp.transform(utf8.decoder).join()`, then the
-  SSE-pump below was also listening to upstreamResp. Dart's
-  `dart:io` HttpResponse can only be listened to once -- the debug
-  capture consumed the stream, the SSE pump threw
-  `Bad state: Stream has already been listened to`, the bridge
-  returned 500, and after five such 500s the circuit breaker opened
-  and locked out every other model. Skip the debug-body capture
-  when the request is `streaming`; the buffer was unnecessary for
-  streaming responses and was the cause of the double-listen.
-  Non-streaming >=400 responses still write the full body to
-  `/tmp/opencode/agrout-debug/`.
-- **`glm-5.3` recommendation changed from `openai` to `anthropic`.**
-  The OpenAI path returned intermittent 400 / 500 /
-  `sensitive_words_detected` responses during real sessions (bridge
-  log excerpt recorded in `docs/MODEL-ENDPOINTS.md` `glm-5.3`
-  caveat). Anthropic path has been stable in 3-shot probes. Example
-  Anthropic block in the doc now includes `glm-5.3 /An`; the OpenAI
-  example block no longer lists it.
+  text so a translator outage never blocks a request. Runs on both
+  the OpenAI path (`/v1/chat/completions`) and the Anthropic path
+  (`/v1/messages`). 11 new unit tests in `test/translator_test.dart`.
+
+- **Translation cache + parallel dispatch.**
+  Real-session test on a 378k-token context showed pre-cache
+  first-request latency of 30-80 s (sequential Google translate for
+  every `user` turn in history). v0.1.25 ships an in-memory LRU cache
+  (default 2048 entries, sha1-keyed) inside `Translator.toEnglish`,
+  plus parallel `Future.wait` dispatch in `translateUserMessagesInBody`.
+  First request pays one Google round-trip; every subsequent request
+  for the same session is essentially free. Cache is per-process and
+  not persisted to disk. 3 new cache tests added.
+
+- **Short-text detector override + two-pass translate retry.**
+  Google auto-detect is unreliable for short inputs (24 non-whitespace
+  chars or less). Probed 2026-08-31: `"Halo"` labelled `en`,
+  `"Saya lapar"` labelled `ms`. Fix: the bridge treats every message
+  at or below that length as unknown language and always sends it to
+  the translator. `_fetch` also does a two-pass retry: first an
+  auto-detect call, then `sl=id` if the first pass returned the text
+  unchanged, so `"Halo"` becomes `"Hello"` before it reaches the
+  upstream. 5 new short-text tests added.
+
+- **Sensitive Chinese phrase scrub (protection B).**
+  A separate `sensitive_words_detected` (HTTP 500) gate fires on
+  politically sensitive Chinese phrases in any role in the request
+  body, including `assistant` and `tool` history. These phrases
+  entered sessions during hcnsec.cn provider research. Protection B
+  (`scrubSensitiveZh` in `translator.dart`) runs a regex over the
+  full serialized body and replaces matching phrases with `[redacted]`
+  before forwarding. Runs before user-message translation (order:
+  B then A) so translated content cannot reintroduce a phrase via a
+  different encoding. `deepseek-v4-flash` on the OpenAI path now
+  returns 200 OK for sessions that previously triggered the 500.
+
+- **Filler system-prompt expansion past the `sensitive_words_detected` gate.**
+  The exact string `"You are a helpful assistant."` (with trailing
+  period) deterministically trips the upstream 500 on every model
+  (probed 2026-08-31, 5/5 retries). Fix: `expandFillerSystemPromptsInBody`
+  in `translator.dart` detects that exact filler and replaces it with
+  a longer, instruction-rich English block that passes the coherent-
+  block threshold. Handles both OpenAI (first `system` message) and
+  Anthropic (top-level `system` field, string or content-block list)
+  shapes. Runs before user-message translation. 6 new tests added.
+
+- **Debug body dumps.**
+  Real sessions kept hitting intermittent `content-blocked` upstream
+  with no visibility into what the bridge actually forwarded. New
+  per-request body dumps in `/tmp/opencode/agrout-debug/` (default
+  dir, overridable via `AGRROUT_DEBUG_DIR`). Gated on
+  `AGRROUT_DEBUG=1` or a non-empty `AGRROUT_DEBUG_DIR`; default OFF
+  to avoid disk floods. Three files per request:
+  `<ts>_in_<model>.json` (inbound after scrub/translate),
+  `<ts>_out_<model>.json` (outbound metadata),
+  `<ts>_upstream_<model>.json` (raw upstream response, non-streaming
+  only). Bodies are `jsonEncode`'d so control characters survive as
+  `\n` escapes. Clamped to 256 KiB by default; set
+  `AGRROUT_DEBUG_MAX_BODY` (bytes) to capture larger payloads.
+  Streaming responses skip the upstream body capture to avoid
+  double-listen on the response stream.
+
+### Fix
+
+- **Circuit breaker ignores 4xx and policy 5xx.**
+  Real-session testing showed AgentRouter's `500 sensitive_words_detected`
+  (a permanent policy gate) was being counted as a transport failure
+  and tripping the circuit breaker, masking a healthy model for
+  1-10 minutes. `CircuitBreaker.recordFailure(statusCode)` now only
+  counts transport-level failures (HTTP 502/503/504 and socket errors);
+  4xx and 500 are skipped. The per-model `ModelHealth` table still
+  records every failure for `/v1/models` filtering and TUI surfacing.
+  3 new circuit tests added.
+
+- **User-message translation runs on both upstream paths.**
+  The translation block was nested inside the `format == StreamFormat.openai`
+  branch, so Anthropic-path callers (`/v1/messages`) forwarded user
+  messages verbatim and hit the language gate. The block is now a
+  sibling to (not nested inside) the OpenAI-only block; translation
+  and the reply-language instruction now fire for both paths.
+
+- **Skip upstream body capture for streaming responses.**
+  The debug-body capture for `status >= 400` was calling
+  `upstreamResp.transform(utf8.decoder).join()` and then the SSE pump
+  also tried to listen to `upstreamResp`. Dart `dart:io` streams can
+  only be listened to once: the debug capture consumed the stream and
+  the SSE pump threw `Bad state: Stream has already been listened to`.
+  After five such 500s the circuit breaker opened and locked out every
+  model. Fix: skip the upstream body capture when the request is
+  streaming. Non-streaming responses (including non-streaming errors)
+  still write the full body to the debug directory.
+
+- **Debug body dumps are JSON-parseable and env-configurable.**
+  Initial implementation wrote raw body strings containing unescaped
+  newlines and control characters, making the files unparseable by
+  standard JSON readers. Switched to `jsonEncode` for the body field.
+  Added `AGRROUT_DEBUG_MAX_BODY` env var (bytes, default 256 KiB) so
+  a reproduction session can capture the full 2 MB+ body when hunting
+  a `sensitive_words` trigger without modifying code.
+
+- **CI test workflow repaired after stats refactor.**
+  The `test.yml` workflow listed specific test files explicitly; the
+  stats refactor renamed `usage_store_test.dart` to
+  `stats_store_test.dart` and the workflow ran zero tests without
+  error. Changed to bare `dart test` so the runner discovers all
+  tests automatically.
 
 ### Docs
 
-- **`docs/MODEL-ENDPOINTS.md` — per-model upstream endpoint guide.**
+- **`docs/LANGUAGE-GATE.md`** — new comprehensive document covering:
+  empirical language-gate probe data (2026-08-30), what the bridge
+  does (translate + reply-language inject), short-text two-pass
+  override, filler system-prompt expansion, sensitive Chinese phrase
+  scrub (protection B), translation cache and parallelism, tuning
+  controls, limitations, and code locations.
 
-- **`docs/MODEL-ENDPOINTS.md` — per-model upstream endpoint guide.**
-  Documents which of the two upstream paths (`/v1/messages` Anthropic vs
+- **`docs/MODEL-ENDPOINTS.md`** — new per-model upstream endpoint
+  guide: which of the two upstream paths (`/v1/messages` Anthropic vs
   `/v1/chat/completions` OpenAI) each AgentRouter model is best served
-  from, with the probe data behind each recommendation, the
-  operational log excerpts that surfaced the issue, and ready-to-paste
-  `opencode.jsonc` blocks for both `npm` flavours. The bridge does not
-  auto-route today; the caller still has to pick the right path. The
-  end of the file captures the deferred auto-routing + response-shape
-  conversion plan so it is not lost.
-- **Naming convention: `/An` and `/Op` suffix.** Each model entry in
-  `opencode.jsonc` carries a short suffix on its display `name` to
-  make the path assignment visible in the OpenCode model picker.
-  `/An` = served from the Anthropic path (`/v1/messages`);
-  `/Op` = served from the OpenAI path (`/v1/chat/completions`). The
-  model *id* (the key under `provider.X.models`) stays the raw name;
-  only the display `name` gets the suffix. Recommendation table and
-  example blocks in `docs/MODEL-ENDPOINTS.md` use the suffix.
-- **`glm-5.3` recommendation changed from `openai` to `anthropic`.**
-  The OpenAI path returned intermittent 400 / 500 / `sensitive_words`
-  responses during real sessions (bridge log excerpt recorded in
-  `docs/MODEL-ENDPOINTS.md` `glm-5.3` caveat). Anthropic path has
-  been stable in 3-shot probes. Example Anthropic block in the doc
-  now includes `glm-5.3 /An`; the OpenAI example block no longer
-  lists it.
+  from, with probe data, operational log excerpts, `/An` and `/Op`
+  suffix naming convention, ready-to-paste `opencode.jsonc` blocks,
+  `deepseek-v4-flash` and `glm-5.3` caveats, and the deferred
+  auto-routing roadmap.
+
+- **`docs/CONTENT-FILTER.md`** — updated with:
+  `"You are a helpful assistant."` filler deterministic 500 finding,
+  new section on `sensitive_words_detected` (HTTP 500) as a separate
+  gate, double-protection order (B scrub then A translate), and
+  cross-links to `LANGUAGE-GATE.md` and `MODEL-ENDPOINTS.md`.
+
+- **`docs/ARCHITECTURE.md`** — updated with: `translator.dart` in
+  file structure, updated proxy flow diagram showing B and A steps
+  before forwarding, new Translator section (LRU cache, parallel
+  dispatch, singleton ownership), debug body dumps section (env vars,
+  file naming, JSON-encode, SSE caveat), circuit breaker transport-only
+  design rationale.
+
+- **`AGENTS.md`** — updated file structure (correct `server/` files:
+  `proxy.dart`, `circuit.dart`, `sse.dart`; updated descriptions),
+  updated debug body dumps section (JSON-encoded bodies,
+  `AGRROUT_DEBUG_MAX_BODY`, SSE caveat).
+
+- **`README.md`** — updated feature list with short-text two-pass,
+  filler expansion, LRU cache, sensitive Chinese scrub, and debug
+  body dumps bullets.
 
 ## v0.1.24 (2026-08-20)
 

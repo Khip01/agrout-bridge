@@ -30,11 +30,12 @@ agrout-bridge/
 │       │   ├── login.dart          # Local sign-in server (paste API key, validate /v1/models)
 │       │   ├── stats_store.dart    # Persistent per-day usage stats (stats.jsonl, 30-day retention)
 │       │   ├── log_store.dart      # JSONL activity log (2000 entries)
+│       │   ├── translator.dart     # Auto-translate user messages + scrub sensitive Chinese + filler expand; LRU cache + parallel dispatch
 │       │   └── updater.dart        # Self-update: latest.json CDN + Tags API fallback, download .tgz + npm install -g
 │       ├── server/
-│       │   ├── server_controller.dart # HTTP server + routing
-│       │   ├── proxy.dart          # Forward + WAF capture + usage extraction
-│       │   ├── circuit.dart        # Circuit breaker + per-model health
+│       │   ├── server_controller.dart # HTTP server + routing; owns singleton Translator instance
+│       │   ├── proxy.dart          # Forward + WAF capture + usage extraction + debug body dumps (AGRROUT_DEBUG)
+│       │   ├── circuit.dart        # Circuit breaker (transport-only: 502/503/504/socket) + per-model health
 │       │   └── sse.dart            # SSE pump (format-aware terminator + OpenAI scrub)
 │       └── tui/
 │           ├── app.dart            # Nocterm TUI: 4 pages + log side panel
@@ -73,13 +74,18 @@ agrout-bridge/
 Client ──> POST /v1/messages         ──>  proxy.dart
         (x-api-key / Authorization)        │
                                            ├─ inject spoof headers + WAF cookies
+                                           ├─ B: scrubSensitiveZh (Chinese phrase regex, all roles)
+                                           ├─ B: expandFillerSystemPromptsInBody (narrow filler expand)
+                                           ├─ A: translateUserMessagesInBody (user-role, non-allow-list -> EN)
+                                           ├─ debug dump: _in_ file (if AGRROUT_DEBUG=1)
                                            ├─ forward to https://agentrouter.org/v1/messages
                                            │
 Upstream ──> 200 text/event-stream    <──  │
         (or application/json)
                                            ├─ capture fresh Set-Cookie into profile
-                                            ├─ circuit.recordSuccess / Failure (transport only)
-                                            ├─ modelHealth.recordFailure (4xx + 5xx, for /v1/models filtering)
+                                           ├─ debug dump: _upstream_ file (non-streaming only)
+                                           ├─ circuit.recordSuccess / Failure (transport only: 502/503/504/socket)
+                                           ├─ modelHealth.recordFailure (4xx + 5xx, for /v1/models filtering)
                                            ├─ pumpSse for SSE; buffered copy otherwise
                                            └─ record usage + cost into StatsStore (per-day)
 Client  <──  200 (or 4xx / 5xx)       <──
@@ -88,6 +94,87 @@ Client  <──  200 (or 4xx / 5xx)       <──
 The proxy never translates between protocols. AgentRouter speaks both
 Anthropic Messages and OpenAI Chat Completions natively, so each route
 is a straight pass-through with the spoof + WAF layer in front.
+
+### Translator (protection A + B)
+
+Before the request is forwarded, `proxy.dart` applies two content
+protection layers via `lib/src/services/translator.dart`:
+
+- **B: Sensitive phrase scrub** (`scrubSensitiveZh`). Regex over the
+  full serialized body. Replaces politically sensitive Chinese phrases
+  (from `_sensitiveZhRegex`) with `[redacted]`. Covers all roles.
+  Runs first so that subsequent translation cannot re-introduce a
+  phrase in a different encoding.
+- **B: Filler expand** (`expandFillerSystemPromptsInBody`). Detects
+  the exact string `"You are a helpful assistant."` in the system
+  message and replaces it with a longer instruction block. Prevents
+  the `sensitive_words_detected` 500 that this narrow filler triggers.
+- **A: User-message translate** (`translateUserMessagesInBody`). Walks
+  only `user`-role messages. Detects source language via the keyless
+  Google translate endpoint. Rewrites anything outside the allow-list
+  (CN/EN/FR/DE/RU) to English. Injects `[System note: Respond in
+  <lang>]` into the last user message so the model replies in the
+  user's original language. Short texts (24 non-WS chars) always go
+  through the translator (detector unreliable at that length). A
+  two-pass fetch retries with `sl=id` when the first pass returns the
+  text unchanged. Runs after B.
+
+The `Translator` instance is a singleton owned by `server_controller`.
+It holds an in-memory LRU cache (2048 entries, sha1-keyed) so repeated
+user turns in the same session are cache hits. Parallel `Future.wait`
+dispatch keeps first-request latency to one Google round-trip. Cache
+is not persisted to disk; it resets on bridge restart.
+
+Translation is gated on `AppConfig.translateUserMessages` (default
+`true`). Toggle from TUI Proxy Config page (`[4]` then `[t]`).
+
+See `docs/LANGUAGE-GATE.md` for the full empirical evidence and design.
+
+### Debug body dumps
+
+Set `AGRROUT_DEBUG=1` (or `AGRROUT_DEBUG_DIR=<path>`) to write three
+JSON files per proxied request to `$AGRROUT_DEBUG_DIR` (default
+`/tmp/opencode/agrout-debug`):
+
+| File suffix | Contents |
+|---|---|
+| `_in_<model>.json` | Inbound request body after all scrubs + translation |
+| `_out_<model>.json` | Outbound headers + response metadata |
+| `_upstream_<model>.json` | Raw upstream response body (non-streaming only) |
+
+Each file starts with a JSON metadata header (`model`, `path`,
+`status`, `ts`, etc.) followed by a `---` separator and the body
+content. Bodies are `jsonEncode`'d so control characters survive as
+`\n` escapes and the file is parseable by any JSON reader. Body is
+clamped to `$AGRROUT_DEBUG_MAX_BODY` bytes (default 256 KiB); set
+the env var to a larger number to capture full 2MB+ bodies when
+hunting a `sensitive_words` trigger.
+
+Streaming responses skip the upstream body capture (the stream is not
+buffered a second time); the `_upstream_` file is empty for SSE
+requests.
+
+Off by default. Do not leave on in production; the files accumulate
+quickly.
+
+### Circuit breaker (transport-only)
+
+`lib/src/server/circuit.dart` implements a per-model circuit breaker.
+Key design decision from v0.1.25: only **transport-level failures**
+count as circuit failures. Specifically:
+
+- **Counted**: HTTP 502, 503, 504, socket errors (connection refused,
+  timeout, DNS failure).
+- **Not counted**: 4xx (client errors, policy gates), HTTP 500 with
+  `sensitive_words_detected` or `content-blocked` bodies (permanent
+  content policy, not transient upstream failure).
+
+The rationale: `500 sensitive_words_detected` is a deterministic
+policy rejection, not a sign that the upstream is degraded. Counting
+it as a circuit failure was masking healthy models for 1-10 minutes
+after a single policy hit. The per-model `ModelHealth` table still
+records every 4xx/5xx for `/v1/models` filtering and TUI surfacing,
+even though the circuit does not open for them.
 
 ### Content filter and 504 ceiling
 
