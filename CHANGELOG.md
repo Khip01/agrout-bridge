@@ -44,6 +44,18 @@
   hit the language gate. The block is now sibling to (not nested
   inside) the OpenAI-only block; translation and the
   reply-language instruction now fire for both paths.
+- **Expand narrow filler system prompts past the
+  `sensitive_words_detected` gate.** Probing the upstream on
+  2026-08-31 surfaced a deterministic 500 when the request body
+  carries the exact string `"You are a helpful assistant."`
+  (case-sensitive, with trailing period) as the system prompt.
+  Five retries reproduce 5/5. The fix detects that exact
+  boilerplate and swaps it for a longer, instruction-rich English
+  block that the gate accepts. Both OpenAI (first system
+  message) and Anthropic (top-level `system` field, string or
+  content-block list) shapes are handled by
+  `expandFillerSystemPromptsInBody`. The expansion runs before
+  user-message translation in `proxyRequest`. 6 new tests added.
 - **`glm-5.3` recommendation changed from `openai` to `anthropic`.**
   The OpenAI path returned intermittent 400 / 500 /
   `sensitive_words_detected` responses during real sessions (bridge
