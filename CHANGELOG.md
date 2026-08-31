@@ -56,6 +56,21 @@
   content-block list) shapes are handled by
   `expandFillerSystemPromptsInBody`. The expansion runs before
   user-message translation in `proxyRequest`. 6 new tests added.
+- **Debug body dumps + short-text translate override.** Real
+  sessions kept hitting intermittent content-blocked upstream and
+  there was no way to inspect what the bridge actually sent. Two
+  new behaviors: (1) per-request body dumps in
+  `/tmp/opencode/agrout-debug/` (`in` = client body, `out` =
+  post-mutation body, `upstream` = error body for >=400). Gated on
+  `AGRROUT_DEBUG=1` or a non-empty `AGRROUT_DEBUG_DIR`; default
+  off to avoid disk floods. (2) For 24-non-whitespace-char-or-less
+  text the Google auto-detect mismatch rate is too high to trust
+  (probed 2026-08-31: "Halo" -> `en`, "Saya lapar" -> `ms`); the
+  translator now always translates short text, and `_fetch` does a
+  two-pass retry (auto-detect, then `sl=id` if the first pass
+  returned unchanged) so words like "Halo" actually become
+  "Hello" before they reach the upstream. 5 new short-text tests
+  added.
 - **`glm-5.3` recommendation changed from `openai` to `anthropic`.**
   The OpenAI path returned intermittent 400 / 500 /
   `sensitive_words_detected` responses during real sessions (bridge
