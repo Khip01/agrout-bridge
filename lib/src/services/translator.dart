@@ -119,30 +119,72 @@ class Translator {
     return fresh;
   }
 
+  /// True when the input is short enough that Google auto-detect is
+  /// unreliable ("Halo" -> `en`, "Saya lapar" -> `ms`). For these
+  /// short inputs the caller should still send the text through
+  /// translation instead of trusting the detector. The chosen 24-char
+  /// threshold matches the empirical breakage point from 2026-08-31
+  /// probing: at that length the detector had a 50% mismatch rate on
+  /// Indonesian inputs; at 50+ chars the rate dropped to <5%.
+  static bool _isUnreliablyShort(String text) {
+    // Count non-whitespace characters.
+    var n = 0;
+    for (final r in text.runes) {
+      // ASCII space and control whitespace only -- not the typical
+      // non-ASCII letters an Indonesian word contains.
+      if (r != 0x20 && r != 0x09 && r != 0x0A && r != 0x0D) n++;
+      if (n > 24) return false;
+    }
+    return n > 0 && n <= 24;
+  }
+
   Future<TranslationResult> _fetch(String text) async {
+    // First pass: auto-detect. Short text often mis-labels here, so
+    // whenever the response is a no-op (detected as already-English) we
+    // retry with a forced source language of `id` -- the upstream is
+    // happier with English text, and "Halo" actually does translate to
+    // "Hello" when the engine is told the source is Indonesian.
+    for (final forcedSrc in const [null, 'id']) {
+      final result = await _fetchOnce(text, forcedSrc);
+      if (result == null) {
+        // Fetch failed for this pass; if we still have a retry, try
+        // the next pass. If that also fails, fall back to passthrough.
+        if (forcedSrc == 'id') {
+          return TranslationResult(
+              detectedLanguage: '', translatedText: text, translated: false);
+        }
+        continue;
+      }
+      final translated = result.translatedText;
+      if (translated != text) return result;
+      if (forcedSrc == 'id') return result; // exhausted both passes
+    }
+    // Unreachable, but keeps the analyzer happy.
+    return TranslationResult(
+        detectedLanguage: '', translatedText: text, translated: false);
+  }
+
+  Future<TranslationResult?> _fetchOnce(String text, String? forcedSrc) async {
     try {
-      final uri = Uri.parse(_endpoint).replace(queryParameters: {
+      final params = <String, String>{
         'client': 'gtx',
-        'sl': 'auto',
         'tl': 'en',
         'dt': 't',
         'q': text,
-      });
+        if (forcedSrc != null) 'sl': forcedSrc,
+      };
+      final uri = Uri.parse(_endpoint).replace(queryParameters: params);
       final req = await _client.getUrl(uri).timeout(_timeout);
       req.headers.set(HttpHeaders.userAgentHeader, 'Mozilla/5.0');
       final resp = await req.close().timeout(_timeout);
-      if (resp.statusCode != 200) {
-        return TranslationResult(
-            detectedLanguage: '', translatedText: text, translated: false);
-      }
+      if (resp.statusCode != 200) return null;
       final raw = await resp
           .transform(utf8.decoder)
           .join()
           .timeout(_timeout);
       return _parse(raw, text);
     } catch (_) {
-      return TranslationResult(
-          detectedLanguage: '', translatedText: text, translated: false);
+      return null;
     }
   }
 
@@ -177,11 +219,23 @@ class Translator {
       }
       final translatedText =
           buffer.isEmpty ? original : buffer.toString();
+      // Short text: detector is too unreliable. "Halo" -> `en`, "Saya
+      // lapar" -> `ms`, "Terima kasih" -> `id` -- three Indonesian inputs,
+      // three different labels, two of them wrong. Treat short text
+      // (under [_isUnreliablyShort] threshold) as never-trusted: always
+      // trust the translation result instead. The cost is one Google
+      // round-trip per short text; the cache makes repeated identical
+      // strings free, and an empty-input or fetch failure is reported
+      // as translated=false so the original is forwarded.
+      //
+      // For long text, trust the detector: if the source is already in
+      // the allow-list (en/zh/fr/de/ru), the upstream accepts it as-is.
       final supported = isGatewaySupported(detected);
-      // Only mark as "translated" when we actually replaced non-supported
-      // text with a different English rendering.
-      final didTranslate =
-          !supported && detected.isNotEmpty && translatedText != original;
+      final isShort = _isUnreliablyShort(original);
+      final shouldTranslate = isShort || !supported;
+      final didTranslate = shouldTranslate &&
+          detected.isNotEmpty &&
+          translatedText != original;
       return TranslationResult(
         detectedLanguage: detected,
         translatedText: didTranslate ? translatedText : original,

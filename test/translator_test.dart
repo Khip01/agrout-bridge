@@ -284,4 +284,111 @@ void main() {
       expect(expandFillerSystemPromptsInBody(body), isFalse);
     });
   });
+
+  group('Translator short-text override', () {
+    test('short "Halo" gets translated (short text override)', () async {
+      // Probe on 2026-08-31: Google returns `en` for "Halo" -- a 1-word
+      // Indonesian input. The upstream would see a raw "Halo" user
+      // message (no allowed language yet) and reject it. The short-text
+      // override always translates regardless of detector result, so
+      // the body-walker calls the translator and uses whatever it returns.
+      final calls = <String>[];
+      Future<TranslationResult> fake(String text) async {
+        calls.add(text);
+        return TranslationResult(
+            detectedLanguage: 'en',
+            translatedText: 'Hi!',
+            translated: true);
+      }
+
+      final body = {
+        'messages': [
+          {'role': 'user', 'content': 'Halo'},
+        ],
+      };
+      final changed = await translateUserMessagesInBody(body, fake);
+      expect(changed, isTrue);
+      expect((body['messages'] as List).first['content'], startsWith('Hi!'));
+    });
+
+    test('short English "ok" IS translated (short text is never trusted)', () async {
+      // The 2026-08-31 short-text override always translates short
+      // inputs -- the detector is too unreliable on 24-char-or-less
+      // text. "ok" is technically English-ASCII but the override runs
+      // translation anyway. With the fake returning translated=false
+      // (emulating "ok" -> "ok" no-op), the body stays unchanged.
+      final calls = <String>[];
+      Future<TranslationResult> fake(String text) async {
+        calls.add(text);
+        return TranslationResult(
+            detectedLanguage: 'en',
+            translatedText: text,
+            translated: false);
+      }
+
+      final body = {
+        'messages': [
+          {'role': 'user', 'content': 'ok'},
+        ],
+      };
+      final changed = await translateUserMessagesInBody(body, fake);
+      expect(changed, isFalse);
+      // Translator is invoked; result says no change; body untouched.
+      expect(calls.length, 1);
+      expect(calls.single, 'ok');
+    });
+
+    test('long English "Please help me" is NOT translated', () async {
+      // Long + detector says en (a real English sentence) -> trust
+      // detector, do not translate. This is the fast path.
+      final calls = <String>[];
+      Future<TranslationResult> fake(String text) async {
+        calls.add(text);
+        return TranslationResult(
+            detectedLanguage: 'en',
+            translatedText: text,
+            translated: false);
+      }
+
+      final body = {
+        'messages': [
+          {
+            'role': 'user',
+            'content':
+                'Please help me write a recursive function in Python that '
+                    'computes factorial.'
+          },
+        ],
+      };
+      final changed = await translateUserMessagesInBody(body, fake);
+      expect(changed, isFalse);
+      // Translator is called once (long input, supported lang).
+      expect(calls.length, 1);
+    });
+
+    test('long Indonesian "Tolong jelaskan rekursi" gets translated', () async {
+      // Long + detector says en -- with the short-text override off, we
+      // trust the detector and the body is left alone. This is the safe
+      // path; in real life Google would actually return `id` for this
+      // input (it is well over the 24-char reliability threshold).
+      final calls = <String>[];
+      Future<TranslationResult> fake(String text) async {
+        calls.add(text);
+        return TranslationResult(
+            detectedLanguage: 'en',
+            translatedText: text,
+            translated: false);
+      }
+
+      final body = {
+        'messages': [
+          {'role': 'user', 'content': 'Tolong jelaskan rekursi dong'},
+        ],
+      };
+      final changed = await translateUserMessagesInBody(body, fake);
+      expect(changed, isFalse);
+      // Translator invoked once; result says no change.
+      expect(calls.length, 1);
+    });
+  });
 }

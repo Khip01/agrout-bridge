@@ -9,6 +9,71 @@ import '../services/waf.dart';
 import 'circuit.dart';
 import 'sse.dart';
 
+/// Path for the per-request debug dump directory. Set the
+/// environment variable `AGRROUT_DEBUG_DIR` to override.
+String? get _debugDirEnv => Platform.environment['AGRROUT_DEBUG_DIR'];
+
+/// Best-effort extraction of the agentrouter request-id from a
+/// upstream error body. Looks for `request id: XXXX` first, then
+/// `"request_id":"XXXX"`, and finally `"x-oneapi-request-id":"XXXX"`
+/// in the raw body. Returns the empty string if nothing matches.
+String _extractRequestId(String body) {
+  for (final pattern in [
+    RegExp(r'request id:\s*([A-Za-z0-9_-]+)'),
+    RegExp(r'"request_id"\s*:\s*"([A-Za-z0-9_-]+)"'),
+    RegExp(r'"x-oneapi-request-id"\s*:\s*"([A-Za-z0-9_-]+)"'),
+  ]) {
+    final m = pattern.firstMatch(body);
+    if (m != null) return m.group(1) ?? '';
+  }
+  return '';
+}
+
+/// True when per-request body dumps are enabled. Off by default
+/// (writes a lot of disk); set `AGRROUT_DEBUG=1` to turn on.
+bool get _debugEnabled {
+  if (Platform.environment['AGRROUT_DEBUG'] == '1') return true;
+  final d = _debugDirEnv;
+  return d != null && d.isNotEmpty;
+}
+
+/// Write a per-request debug artifact. [tag] is `in`, `out`, or
+/// `upstream`. [meta] is a small map of extra info. [body] is the
+/// request body (clamped to [_debugMaxBody]). Files are named
+/// `<timestamp>_<tag>_<model>_<n>.json` and live under
+/// [_debugDirEnv] (default `/tmp/opencode/agrout-debug`).
+const int _debugMaxBody = 256 * 1024; // 256 KiB per artifact
+void _debugWrite(String tag, Map<String, dynamic> meta, dynamic body) {
+  if (!_debugEnabled) return;
+  try {
+    final dir = _debugDirEnv ?? '/tmp/opencode/agrout-debug';
+    Directory(dir).createSync(recursive: true);
+    final ts = DateTime.now().toIso8601String().replaceAll(':', '-');
+    final model = (meta['model'] as String?) ?? 'unknown';
+    final safe = model.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    final f = File('$dir/${ts}_${tag}_${safe}.json');
+    String bodyStr;
+    if (body == null) {
+      bodyStr = '';
+    } else if (body is String) {
+      bodyStr = body.length > _debugMaxBody
+          ? body.substring(0, _debugMaxBody) + '\n[truncated at $_debugMaxBody]'
+          : body;
+    } else {
+      final enc = jsonEncode(body);
+      bodyStr = enc.length > _debugMaxBody
+          ? '${enc.substring(0, _debugMaxBody)}\n[truncated at $_debugMaxBody]'
+          : enc;
+    }
+    f.writeAsStringSync(
+      '${jsonEncode(meta)}\n${'-' * 60}\n$bodyStr\n',
+      flush: true,
+    );
+  } catch (_) {
+    // Never fail a real request because of debug logging.
+  }
+}
+
 /// What happened to a single proxied request.
 class ProxyOutcome {
   final int statusCode;
@@ -111,6 +176,18 @@ Future<void> proxyRequest({
               : 0;
           logMsg('PROXY in: model=$model, format=$format, '
               'stream=$streaming, user_msg_count=$_userMsgCount');
+          // Dump the request body the client sent. The bridge mutates `body`
+          // in place below; the `in` artifact is the pre-mutation snapshot
+          // so the failure analysis can compare what the client sent vs.
+          // what the bridge forwarded.
+          _debugWrite('in', {
+            'model': model,
+            'format': format.toString(),
+            'stream': streaming,
+            'user_msg_count': _userMsgCount,
+            'body_bytes': bodyBytes.length,
+            'client': clientReq.headers.value('user-agent') ?? '',
+          }, utf8.decode(bodyBytes, allowMalformed: true));
           // Trim oversized system messages (Opencode/Claude Code emit a very
           // large system prompt with memory/skills/journal blocks) to avoid
           // tripping agentrouter.org's input content filter / quota. Mirrors
@@ -194,6 +271,14 @@ Future<void> proxyRequest({
               // Never block a request on a translation failure.
             }
           }
+          // Dump the post-mutation body that will actually go upstream.
+          // Compare this to the `in` artifact to see what the bridge did.
+          _debugWrite('out', {
+            'model': model,
+            'format': format.toString(),
+            'stream': streaming,
+            'body_bytes': bodyBytes.length,
+          }, utf8.decode(bodyBytes, allowMalformed: true));
         }
       } catch (_) {}
     }
@@ -215,6 +300,28 @@ Future<void> proxyRequest({
     );
 
     statusCode = upstreamResp.statusCode;
+
+    // For failed responses, capture the body so the failure is reproducible
+    // from the debug artifacts. For 200s we already have the live stream; no
+    // need to buffer it.
+    String? _upstreamBodyForLog;
+    if (statusCode >= 400) {
+      try {
+        _upstreamBodyForLog = await upstreamResp
+            .transform(utf8.decoder)
+            .join()
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {
+        _upstreamBodyForLog = '<body read failed>';
+      }
+      _debugWrite('upstream', {
+        'model': model,
+        'status': statusCode,
+        'body_bytes': _upstreamBodyForLog.length,
+        'content_type': upstreamResp.headers.value('content-type') ?? '',
+        'request_id': _extractRequestId(_upstreamBodyForLog),
+      }, _upstreamBodyForLog);
+    }
 
     // Capture any WAF cookies the upstream rotated on this response.
     final cb = onWafCaptured;
