@@ -71,6 +71,19 @@
   returned unchanged) so words like "Halo" actually become
   "Hello" before they reach the upstream. 5 new short-text tests
   added.
+- **Don't double-listen upstream response stream when logging.**
+  The 2026-08-31 debug-body capture for `status >= 400` was
+  calling `upstreamResp.transform(utf8.decoder).join()`, then the
+  SSE-pump below was also listening to upstreamResp. Dart's
+  `dart:io` HttpResponse can only be listened to once -- the debug
+  capture consumed the stream, the SSE pump threw
+  `Bad state: Stream has already been listened to`, the bridge
+  returned 500, and after five such 500s the circuit breaker opened
+  and locked out every other model. Skip the debug-body capture
+  when the request is `streaming`; the buffer was unnecessary for
+  streaming responses and was the cause of the double-listen.
+  Non-streaming >=400 responses still write the full body to
+  `/tmp/opencode/agrout-debug/`.
 - **`glm-5.3` recommendation changed from `openai` to `anthropic`.**
   The OpenAI path returned intermittent 400 / 500 /
   `sensitive_words_detected` responses during real sessions (bridge
