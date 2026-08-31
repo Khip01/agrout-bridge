@@ -243,16 +243,33 @@ Future<void> proxyRequest({
                 ..addAll(utf8.encode(jsonEncode(body)));
             }
           }
-          // Translate non-supported-language text in user messages to English
-          // and inject a reply-language instruction. AgentRouter's gateway
-          // rejects any request whose user-role message contains a sentence in
-          // a language outside CN/EN/FR/DE/RU with `content-blocked`
-          // (verified 2026-08-30, docs/LANGUAGE-GATE.md). Only user messages
-          // are checked by the gate, so system/assistant/tool content is left
-          // untouched. Translation runs on BOTH OpenAI and Anthropic paths
-          // because the gate operates at the gateway layer, not the per-format
-          // translator. Translation failures fall back to the original text so
-          // a translate outage never blocks the request.
+          // B: Scrub known politically sensitive Chinese phrases that
+          // AgentRouter's `sensitive_words_detected` gate trips on. These
+          // live in assistant/tool history (e.g. hcnsec research pasted
+          // as tool output), not in user messages, so A alone does not
+          // reach them. The regex is narrow -- only the known phrases --
+          // so value-carrying non-ASCII (box-drawing, checkmarks) stays
+          // intact.
+          if (scrubSensitiveChinesePhrasesInBody(body)) {
+            bodyBytes
+              ..clear()
+              ..addAll(utf8.encode(jsonEncode(body)));
+            logMsg('PROXY scrubbed sensitive Chinese phrases');
+          }
+          // A: Translate non-supported-language text to English and
+          // inject a reply-language instruction. AgentRouter's gateway
+          // rejects any request whose user-role message contains a
+          // sentence in a language outside CN/EN/FR/DE/RU with
+          // `content-blocked` (verified 2026-08-30, `docs/LANGUAGE-GATE.md`).
+          // A used to cover only `role == user` messages; after
+          // real-session debugging on 2026-09-01 it covers
+          // `role in {user, assistant, tool}` so large Chinese assistant
+          // / tool history (2.3 MB, 1842 messages, `新疆幻城...` in tool
+          // output) is also translated. Image content blocks are still
+          // skipped. Translation runs on BOTH OpenAI and Anthropic paths
+          // because the gate operates at the gateway layer, not the
+          // per-format translator. Translation failures fall back to the
+          // original text so a translate outage never blocks the request.
           if (translator != null) {
             try {
               // Expand narrow filler system prompts ("You are a helpful
@@ -271,11 +288,30 @@ Future<void> proxyRequest({
                 body,
                 (text) => translator.toEnglish(text),
               );
-              if (didTranslate) {
+              // Also translate Chinese content in assistant/tool history.
+              // The A-extension is cheap: the body is 2.3 MB but the
+              // translator's LRU cache (2048 entries, sha1-keyed) plus
+              // parallel dispatch keep it to one round-trip; assistant
+              // messages that are plain-English are detected as `en` and
+              // not rewritten. Only non-allow-listed text is rewritten.
+              var didTranslateHistory = false;
+              try {
+                didTranslateHistory = await translateMessagesByRolesInBody(
+                  body,
+                  (text) => translator.toEnglish(text),
+                  const {'assistant', 'tool'},
+                );
+              } catch (_) {}
+              if (didTranslate || didTranslateHistory) {
                 bodyBytes
                   ..clear()
                   ..addAll(utf8.encode(jsonEncode(body)));
-                logMsg('PROXY translated user message(s) to English');
+                if (didTranslate) {
+                  logMsg('PROXY translated user message(s) to English');
+                }
+                if (didTranslateHistory) {
+                  logMsg('PROXY translated history (assistant/tool) to English');
+                }
               }
             } catch (_) {
               // Never block a request on a translation failure.

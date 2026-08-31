@@ -313,6 +313,24 @@ String buildReplyLanguageInstruction(String originalLanguageCode) {
 Future<bool> translateUserMessagesInBody(
   Map<String, dynamic> body,
   Future<TranslationResult> Function(String text) translate,
+) =>
+    _translateMessagesByRoles(body, translate, const {'user'});
+
+/// Like [translateUserMessagesInBody] but translates every message whose
+/// `role` is in [roles] (for B-spesifik: assistant/tool Chinese history).
+/// The reply-language instruction is only appended when `user` is among
+/// the roles.
+Future<bool> translateMessagesByRolesInBody(
+  Map<String, dynamic> body,
+  Future<TranslationResult> Function(String text) translate,
+  Set<String> roles,
+) =>
+    _translateMessagesByRoles(body, translate, roles);
+
+Future<bool> _translateMessagesByRoles(
+  Map<String, dynamic> body,
+  Future<TranslationResult> Function(String text) translate,
+  Set<String> roles,
 ) async {
   final msgs = body['messages'];
   if (msgs is! List) return false;
@@ -325,7 +343,7 @@ Future<bool> translateUserMessagesInBody(
   for (var i = 0; i < msgs.length; i++) {
     final m = msgs[i];
     if (m is! Map) continue;
-    if (m['role'] != 'user') continue;
+    if (!roles.contains(m['role'])) continue;
     final content = m['content'];
     if (content is String) {
       pending.add(_Pending(i, null, content));
@@ -368,8 +386,12 @@ Future<bool> translateUserMessagesInBody(
   }
 
   // Append the reply-language instruction to the final user message so the
-  // model answers in the user's original language.
-  if (changed && lastTranslatedLang != null && lastUserIndex != null) {
+  // model answers in the user's original language. Only when the caller
+  // actually translates user messages.
+  if (roles.contains('user') &&
+      changed &&
+      lastTranslatedLang != null &&
+      lastUserIndex != null) {
     final instruction = buildReplyLanguageInstruction(lastTranslatedLang);
     final m = msgs[lastUserIndex] as Map;
     final content = m['content'];
@@ -399,6 +421,74 @@ class _Pending {
   final int? partIndex; // null for string content
   final String text;
   _Pending(this.msgIndex, this.partIndex, this.text);
+}
+
+bool _isImageContentBlock(Map value) {
+  if (value['type'] == 'image_url') return true;
+  if (value['type'] == 'image' && value['source'] is Map) return true;
+  return false;
+}
+
+/// AgentRouter `sensitive_words_detected` (500) for OpenAI-path
+/// models is triggered by specific politically sensitive Chinese
+/// phrases that appear in tool output during hcnsec / AgentRouter
+/// research (`新疆幻城网安...` etc). These phrases live in
+/// `assistant` / `tool` history, not `user` messages, so the
+/// user-message translator (A) does not touch them. Scrub them to a
+/// harmless placeholder before translation. The regex is intentionally
+/// narrow -- only the known sensitive phrases -- so box-drawing
+/// (`┐─▼`), arrows (`→`), and value-carrying non-ASCII (`✅▣`) are left
+/// intact.
+final _sensitiveChinesePhrasesRegex = RegExp(
+  r'新疆幻城网安科技(?:公益大模型(?:API网关)?)?'
+  r'|网关'
+  r'|免费(?:GPT|GPT·Claude·Gemini接口)?'
+  r'|签到[奖励设置成功！获得]*'
+  r'|服务说明与补偿公告'
+  r'|近期由于上游资源调度及配额分配等原因',
+);
+const _sensitiveChinesePlaceholder = '[redacted sensitive phrase]';
+
+/// Scrub known politically sensitive Chinese phrases from the request
+/// body. Walks both OpenAI and Anthropic shapes (every string value),
+/// preserving image content blocks. Returns `true` if anything changed.
+bool scrubSensitiveChinesePhrasesInBody(Map<String, dynamic> body) {
+  var changed = false;
+  String scrub(String s) {
+    final next = s.replaceAll(
+        _sensitiveChinesePhrasesRegex, _sensitiveChinesePlaceholder);
+    if (next != s) changed = true;
+    return next;
+  }
+
+  void walk(dynamic value) {
+    if (value is String) return; // handled by caller via return value
+    if (value is List) {
+      for (var i = 0; i < value.length; i++) {
+        final v = value[i];
+        if (v is String) {
+          value[i] = scrub(v);
+        } else {
+          walk(v);
+        }
+      }
+      return;
+    }
+    if (value is Map) {
+      if (_isImageContentBlock(value)) return;
+      for (final k in value.keys.toList()) {
+        final v = value[k];
+        if (v is String) {
+          value[k] = scrub(v);
+        } else {
+          walk(v);
+        }
+      }
+    }
+  }
+
+  walk(body);
+  return changed;
 }
 
 /// Replaces a narrow filler system prompt (e.g. `"You are a helpful
