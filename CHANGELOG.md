@@ -37,6 +37,13 @@
   errors); 4xx and `500` are skipped. The per-model `ModelHealth`
   table still records every failure for `/v1/models` filtering and
   TUI surfacing. 3 new circuit tests added.
+- **User-message translation runs on both upstream paths.** The
+  translation block was nested inside the
+  `format == StreamFormat.openai` branch, so Anthropic-path
+  callers (`/v1/messages`) forwarded user messages verbatim and
+  hit the language gate. The block is now sibling to (not nested
+  inside) the OpenAI-only block; translation and the
+  reply-language instruction now fire for both paths.
 - **`glm-5.3` recommendation changed from `openai` to `anthropic`.**
   The OpenAI path returned intermittent 400 / 500 /
   `sensitive_words_detected` responses during real sessions (bridge
